@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "conveyor-belt"
+version = "0.1.0"
+description = "Conveyor-belt manipulation RL environment for Isaac Lab"
+readme = "README.md"
+requires-python = ">=3.10"
+# Isaac Sim + Isaac Lab are installed from the ~/IsaacLab source checkout.
+# Only additional dependencies are listed here.
+dependencies = [
+    "rsl-rl-lib>=3.0.1",
+    "tensorboard>=2.14",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pre-commit",
+    "ruff",
+]
+
+[tool.setuptools.packages.find]
+include = ["conveyor_belt*"]

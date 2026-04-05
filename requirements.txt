@@ -1,0 +1,21 @@
+# ===========================================================================
+# Conveyor-Belt Manipulation Environment — Python Dependencies
+# ===========================================================================
+#
+# Isaac Sim, Isaac Lab, and isaaclab_assets are already installed via the
+# source checkout at ~/IsaacLab.  This file only lists the ADDITIONAL
+# packages needed.
+#
+# Install with:
+#   ~/IsaacLab/isaaclab.sh -p -m pip install -r requirements.txt
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# RL library
+# ---------------------------------------------------------------------------
+rsl-rl-lib>=3.0.1
+
+# ---------------------------------------------------------------------------
+# Logging / visualisation
+# ---------------------------------------------------------------------------
+tensorboard>=2.14
