@@ -43,15 +43,61 @@ from isaaclab.markers.config import FRAME_MARKER_CFG  # isort: skip
 from isaaclab_assets.robots.franka import FRANKA_PANDA_CFG  # isort: skip
 
 # ---------------------------------------------------------------------------
-# Constants
+# Belt geometry
+# ---------------------------------------------------------------------------
+
+BELT_WIDTH = 0.4
+BELT_LENGTH = 2.0
+BELT_THICKNESS = 0.02
+BELT_CENTER_X = 0.5
+
+CONVEYOR_SURFACE_Z = 0.0
+
+_BELT_TOP_Z = CONVEYOR_SURFACE_Z + BELT_THICKNESS / 2
+_BELT_BOTTOM_Z = CONVEYOR_SURFACE_Z - BELT_THICKNESS / 2
+_BELT_LEFT_X = BELT_CENTER_X - BELT_WIDTH / 2
+_BELT_RIGHT_X = BELT_CENTER_X + BELT_WIDTH / 2
+
+# ---------------------------------------------------------------------------
+# Side rails
+# ---------------------------------------------------------------------------
+
+RAIL_HEIGHT = 0.04
+RAIL_THICKNESS = 0.015
+_RAIL_Z = _BELT_TOP_Z + RAIL_HEIGHT / 2
+_LEFT_RAIL_X = _BELT_LEFT_X - RAIL_THICKNESS / 2
+_RIGHT_RAIL_X = _BELT_RIGHT_X + RAIL_THICKNESS / 2
+
+# ---------------------------------------------------------------------------
+# Support legs
+# ---------------------------------------------------------------------------
+
+GROUND_Z = -1.05
+SUPPORT_HEIGHT = _BELT_BOTTOM_Z - GROUND_Z  # legs reach from belt bottom to ground
+SUPPORT_THICKNESS = 0.03
+_LEG_Z = _BELT_BOTTOM_Z - SUPPORT_HEIGHT / 2
+_LEG_INSET_X = 0.04
+_LEG_INSET_Y = 0.06
+
+# ---------------------------------------------------------------------------
+# Robot pedestal
+# ---------------------------------------------------------------------------
+
+ROBOT_BASE_Z = -0.12
+_PEDESTAL_WIDTH = 0.28
+_PEDESTAL_DEPTH = 0.28
+_PEDESTAL_HEIGHT = ROBOT_BASE_Z - GROUND_Z  # from ground up to robot base
+_PEDESTAL_Z = GROUND_Z + _PEDESTAL_HEIGHT / 2
+_PEDESTAL_COLOR = (0.35, 0.35, 0.38)
+
+# ---------------------------------------------------------------------------
+# Objects
 # ---------------------------------------------------------------------------
 
 OBJECT_SIZE = (0.04, 0.04, 0.04)
 OBJECT_MASS_KG = 0.1
-CONVEYOR_SURFACE_Z = 0.0
-CONVEYOR_BELT_THICKNESS = 0.02
 OBJECT_SPAWN_Z = (
-    CONVEYOR_SURFACE_Z + CONVEYOR_BELT_THICKNESS / 2 + OBJECT_SIZE[2] / 2
+    CONVEYOR_SURFACE_Z + BELT_THICKNESS / 2 + OBJECT_SIZE[2] / 2
     + 0.002  # small clearance to avoid first-frame interpenetration with belt
 )
 
@@ -89,6 +135,35 @@ def _object_spawn_cfg(color: tuple[float, float, float]) -> sim_utils.CuboidCfg:
     )
 
 
+def _kinematic_cuboid(
+    size: tuple[float, float, float],
+    color: tuple[float, float, float],
+    *,
+    collision: bool = False,
+) -> sim_utils.CuboidCfg:
+    """Return a kinematic CuboidCfg for structural conveyor parts."""
+    kwargs = dict(
+        size=size,
+        rigid_props=sim_utils.RigidBodyPropertiesCfg(
+            kinematic_enabled=True,
+            disable_gravity=True,
+        ),
+        visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=color),
+    )
+    if collision:
+        kwargs["collision_props"] = sim_utils.CollisionPropertiesCfg()
+        kwargs["physics_material"] = sim_utils.RigidBodyMaterialCfg(
+            static_friction=0.3,
+            dynamic_friction=0.2,
+        )
+    return sim_utils.CuboidCfg(**kwargs)
+
+
+_RAIL_COLOR = (0.18, 0.18, 0.20)
+_LEG_COLOR = (0.30, 0.30, 0.33)
+_BELT_COLOR = (0.22, 0.22, 0.26)
+
+
 # ---------------------------------------------------------------------------
 # Scene
 # ---------------------------------------------------------------------------
@@ -105,7 +180,32 @@ class ConveyorSceneCfg(InteractiveSceneCfg):
 
     # -- Robot ----------------------------------------------------------------
     robot: ArticulationCfg = FRANKA_PANDA_CFG.replace(
-        prim_path="{ENV_REGEX_NS}/Robot"
+        prim_path="{ENV_REGEX_NS}/Robot",
+        init_state=ArticulationCfg.InitialStateCfg(
+            pos=[0.05, 0.0, ROBOT_BASE_Z],
+            joint_pos={
+                "panda_joint1": 0.0,
+                "panda_joint2": -0.569,
+                "panda_joint3": 0.0,
+                "panda_joint4": -2.810,
+                "panda_joint5": 0.0,
+                "panda_joint6": 3.037,
+                "panda_joint7": 0.741,
+                "panda_finger_joint.*": 0.04,
+            },
+        ),
+    )
+
+    # -- Robot pedestal (visual support) --------------------------------------
+    robot_pedestal: AssetBaseCfg = AssetBaseCfg(
+        prim_path="{ENV_REGEX_NS}/RobotPedestal",
+        init_state=AssetBaseCfg.InitialStateCfg(
+            pos=[0.0, 0.0, _PEDESTAL_Z],
+        ),
+        spawn=_kinematic_cuboid(
+            size=(_PEDESTAL_WIDTH, _PEDESTAL_DEPTH, _PEDESTAL_HEIGHT),
+            color=_PEDESTAL_COLOR,
+        ),
     )
 
     # -- End-effector frame sensor --------------------------------------------
@@ -123,25 +223,15 @@ class ConveyorSceneCfg(InteractiveSceneCfg):
     )
 
     # -- Conveyor belt (driven rigid body) ------------------------------------
-    #
-    # Physics design (mirrors the Isaac Sim Conveyor Belt Utility):
-    #   * Dynamic rigid body so ``write_root_velocity_to_sim`` has effect.
-    #   * Very high mass  ➜  objects cannot push the belt off course.
-    #   * Gravity disabled ➜  belt does not sink or drift vertically.
-    #   * HIGH friction    ➜  objects are dragged by contact, not teleported.
-    #
-    # An interval event calls ``drive_conveyor_belt`` every 0.05 s to
-    # maintain the target velocity, analogous to the OmniGraph tick in the
-    # Isaac Sim extension.
     conveyor_belt: RigidObjectCfg = RigidObjectCfg(
         prim_path="{ENV_REGEX_NS}/ConveyorBelt",
         init_state=RigidObjectCfg.InitialStateCfg(
-            pos=[0.5, 0.0, CONVEYOR_SURFACE_Z],
+            pos=[BELT_CENTER_X, 0.0, CONVEYOR_SURFACE_Z],
             rot=[1, 0, 0, 0],
             lin_vel=list(CONVEYOR_VELOCITY),
         ),
         spawn=sim_utils.CuboidCfg(
-            size=(0.3, 0.8, CONVEYOR_BELT_THICKNESS),
+            size=(BELT_WIDTH, BELT_LENGTH, BELT_THICKNESS),
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
                 disable_gravity=True,
                 max_linear_velocity=0.5,
@@ -153,17 +243,103 @@ class ConveyorSceneCfg(InteractiveSceneCfg):
                 static_friction=1.0,
                 dynamic_friction=0.8,
             ),
-            visual_material=sim_utils.PreviewSurfaceCfg(
-                diffuse_color=(0.25, 0.25, 0.30),
-            ),
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=_BELT_COLOR),
+        ),
+    )
+
+    # -- Side rails (kinematic, with collision to keep objects on belt) --------
+    rail_left: AssetBaseCfg = AssetBaseCfg(
+        prim_path="{ENV_REGEX_NS}/RailLeft",
+        init_state=AssetBaseCfg.InitialStateCfg(
+            pos=[_LEFT_RAIL_X, 0.0, _RAIL_Z],
+        ),
+        spawn=_kinematic_cuboid(
+            size=(RAIL_THICKNESS, BELT_LENGTH, RAIL_HEIGHT),
+            color=_RAIL_COLOR,
+            collision=True,
+        ),
+    )
+
+    rail_right: AssetBaseCfg = AssetBaseCfg(
+        prim_path="{ENV_REGEX_NS}/RailRight",
+        init_state=AssetBaseCfg.InitialStateCfg(
+            pos=[_RIGHT_RAIL_X, 0.0, _RAIL_Z],
+        ),
+        spawn=_kinematic_cuboid(
+            size=(RAIL_THICKNESS, BELT_LENGTH, RAIL_HEIGHT),
+            color=_RAIL_COLOR,
+            collision=True,
+        ),
+    )
+
+    # -- Support legs (kinematic, visual only) --------------------------------
+    leg_fl: AssetBaseCfg = AssetBaseCfg(
+        prim_path="{ENV_REGEX_NS}/LegFL",
+        init_state=AssetBaseCfg.InitialStateCfg(
+            pos=[
+                _BELT_LEFT_X + _LEG_INSET_X,
+                -BELT_LENGTH / 2 + _LEG_INSET_Y,
+                _LEG_Z,
+            ],
+        ),
+        spawn=_kinematic_cuboid(
+            size=(SUPPORT_THICKNESS, SUPPORT_THICKNESS, SUPPORT_HEIGHT),
+            color=_LEG_COLOR,
+        ),
+    )
+
+    leg_fr: AssetBaseCfg = AssetBaseCfg(
+        prim_path="{ENV_REGEX_NS}/LegFR",
+        init_state=AssetBaseCfg.InitialStateCfg(
+            pos=[
+                _BELT_RIGHT_X - _LEG_INSET_X,
+                -BELT_LENGTH / 2 + _LEG_INSET_Y,
+                _LEG_Z,
+            ],
+        ),
+        spawn=_kinematic_cuboid(
+            size=(SUPPORT_THICKNESS, SUPPORT_THICKNESS, SUPPORT_HEIGHT),
+            color=_LEG_COLOR,
+        ),
+    )
+
+    leg_bl: AssetBaseCfg = AssetBaseCfg(
+        prim_path="{ENV_REGEX_NS}/LegBL",
+        init_state=AssetBaseCfg.InitialStateCfg(
+            pos=[
+                _BELT_LEFT_X + _LEG_INSET_X,
+                BELT_LENGTH / 2 - _LEG_INSET_Y,
+                _LEG_Z,
+            ],
+        ),
+        spawn=_kinematic_cuboid(
+            size=(SUPPORT_THICKNESS, SUPPORT_THICKNESS, SUPPORT_HEIGHT),
+            color=_LEG_COLOR,
+        ),
+    )
+
+    leg_br: AssetBaseCfg = AssetBaseCfg(
+        prim_path="{ENV_REGEX_NS}/LegBR",
+        init_state=AssetBaseCfg.InitialStateCfg(
+            pos=[
+                _BELT_RIGHT_X - _LEG_INSET_X,
+                BELT_LENGTH / 2 - _LEG_INSET_Y,
+                _LEG_Z,
+            ],
+        ),
+        spawn=_kinematic_cuboid(
+            size=(SUPPORT_THICKNESS, SUPPORT_THICKNESS, SUPPORT_HEIGHT),
+            color=_LEG_COLOR,
         ),
     )
 
     # -- Rigid objects on conveyor --------------------------------------------
+    # Objects start in the upper half of the belt (positive Y) and travel
+    # toward the robot in the -Y direction.
     object_0: RigidObjectCfg = RigidObjectCfg(
         prim_path="{ENV_REGEX_NS}/Object_0",
         init_state=RigidObjectCfg.InitialStateCfg(
-            pos=[0.50, 0.25, OBJECT_SPAWN_Z],
+            pos=[0.50, 0.60, OBJECT_SPAWN_Z],
             rot=[1, 0, 0, 0],
         ),
         spawn=_object_spawn_cfg(color=(0.85, 0.15, 0.15)),
@@ -172,7 +348,7 @@ class ConveyorSceneCfg(InteractiveSceneCfg):
     object_1: RigidObjectCfg = RigidObjectCfg(
         prim_path="{ENV_REGEX_NS}/Object_1",
         init_state=RigidObjectCfg.InitialStateCfg(
-            pos=[0.45, 0.10, OBJECT_SPAWN_Z],
+            pos=[0.45, 0.35, OBJECT_SPAWN_Z],
             rot=[1, 0, 0, 0],
         ),
         spawn=_object_spawn_cfg(color=(0.15, 0.75, 0.15)),
@@ -181,7 +357,7 @@ class ConveyorSceneCfg(InteractiveSceneCfg):
     object_2: RigidObjectCfg = RigidObjectCfg(
         prim_path="{ENV_REGEX_NS}/Object_2",
         init_state=RigidObjectCfg.InitialStateCfg(
-            pos=[0.55, -0.05, OBJECT_SPAWN_Z],
+            pos=[0.55, 0.10, OBJECT_SPAWN_Z],
             rot=[1, 0, 0, 0],
         ),
         spawn=_object_spawn_cfg(color=(0.15, 0.15, 0.85)),

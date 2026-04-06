@@ -121,7 +121,7 @@ def _object_reset_term(asset_name: str) -> EventTerm:
         mode="reset",
         params={
             "asset_cfg": SceneEntityCfg(asset_name),
-            "pose_range": {"x": (-0.06, 0.06), "y": (-0.06, 0.06)},
+            "pose_range": {"x": (-0.06, 0.06), "y": (-0.15, 0.15)},
             "yaw_range": (-0.5, 0.5),
             "conveyor_velocity": CONVEYOR_SPEED,
             "velocity_noise": CONVEYOR_OBJECT_NOISE,
@@ -214,7 +214,7 @@ class TerminationsCfg:
         params={
             "object_names": OBJECT_NAMES,
             "x_bounds": (-0.1, 1.0),
-            "y_bounds": (-0.6, 0.6),
+            "y_bounds": (-1.2, 1.2),
             "z_min": -0.1,
         },
     )
