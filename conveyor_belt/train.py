@@ -1,6 +1,3 @@
-# Copyright (c) 2024-2026. All rights reserved.
-# SPDX-License-Identifier: BSD-3-Clause
-
 """Standalone training script – PPO on the conveyor-belt pick task.
 
 Launch
@@ -100,8 +97,18 @@ def main() -> None:
     env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
 
     # ---- PPO runner ----
+    # rsl-rl v5 MLPModel doesn't accept deprecated fields that configclass
+    # serialises from RslRlMLPModelCfg.  Strip them before passing the dict.
+    _DEPRECATED_MODEL_KEYS = {"stochastic", "init_noise_std", "noise_std_type", "state_dependent_std"}
+
+    cfg_dict = agent_cfg.to_dict()
+    for model_key in ("actor", "critic"):
+        if model_key in cfg_dict and isinstance(cfg_dict[model_key], dict):
+            for k in _DEPRECATED_MODEL_KEYS:
+                cfg_dict[model_key].pop(k, None)
+
     runner = OnPolicyRunner(
-        env, agent_cfg.to_dict(), log_dir=log_dir, device=agent_cfg.device
+        env, cfg_dict, log_dir=log_dir, device=agent_cfg.device
     )
 
     # ---- train ----

@@ -1,6 +1,3 @@
-# Copyright (c) 2024-2026. All rights reserved.
-# SPDX-License-Identifier: BSD-3-Clause
-
 """Scene configuration for the conveyor-belt manipulation environment.
 
 The conveyor belt is modelled as a **high-mass dynamic rigid body** whose
@@ -339,7 +336,7 @@ class ConveyorSceneCfg(InteractiveSceneCfg):
     object_0: RigidObjectCfg = RigidObjectCfg(
         prim_path="{ENV_REGEX_NS}/Object_0",
         init_state=RigidObjectCfg.InitialStateCfg(
-            pos=[0.50, 0.60, OBJECT_SPAWN_Z],
+            pos=[0.50, 0.35, OBJECT_SPAWN_Z],
             rot=[1, 0, 0, 0],
         ),
         spawn=_object_spawn_cfg(color=(0.85, 0.15, 0.15)),
@@ -348,7 +345,7 @@ class ConveyorSceneCfg(InteractiveSceneCfg):
     object_1: RigidObjectCfg = RigidObjectCfg(
         prim_path="{ENV_REGEX_NS}/Object_1",
         init_state=RigidObjectCfg.InitialStateCfg(
-            pos=[0.45, 0.35, OBJECT_SPAWN_Z],
+            pos=[0.45, 0.15, OBJECT_SPAWN_Z],
             rot=[1, 0, 0, 0],
         ),
         spawn=_object_spawn_cfg(color=(0.15, 0.75, 0.15)),
@@ -357,7 +354,7 @@ class ConveyorSceneCfg(InteractiveSceneCfg):
     object_2: RigidObjectCfg = RigidObjectCfg(
         prim_path="{ENV_REGEX_NS}/Object_2",
         init_state=RigidObjectCfg.InitialStateCfg(
-            pos=[0.55, 0.10, OBJECT_SPAWN_Z],
+            pos=[0.55, -0.05, OBJECT_SPAWN_Z],
             rot=[1, 0, 0, 0],
         ),
         spawn=_object_spawn_cfg(color=(0.15, 0.15, 0.85)),

@@ -1,6 +1,3 @@
-# Copyright (c) 2024-2026. All rights reserved.
-# SPDX-License-Identifier: BSD-3-Clause
-
 """Manager-based RL environment configuration for conveyor-belt manipulation.
 
 A Franka Panda must pick rigid cubes from a simulated moving conveyor belt.
@@ -248,7 +245,7 @@ class ConveyorBeltEnvCfg(ManagerBasedRLEnvCfg):
     def __post_init__(self) -> None:
         """Post-initialisation: simulation parameters."""
         self.decimation = 2
-        self.episode_length_s = 8.0
+        self.episode_length_s = 16.0
         # sim
         self.sim.dt = 0.01  # 100 Hz physics
         self.sim.render_interval = self.decimation

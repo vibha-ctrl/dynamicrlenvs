@@ -1,6 +1,3 @@
-# Copyright (c) 2024-2026. All rights reserved.
-# SPDX-License-Identifier: BSD-3-Clause
-
 """Conveyor-belt manipulation environment for Isaac Lab.
 
 Importing this package registers the Gymnasium environment so it can be

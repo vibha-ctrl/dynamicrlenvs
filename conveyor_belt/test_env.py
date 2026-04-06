@@ -1,6 +1,3 @@
-# Copyright (c) 2024-2026. All rights reserved.
-# SPDX-License-Identifier: BSD-3-Clause
-
 """Quick smoke-test for the conveyor-belt environment.
 
 Creates the env with a handful of parallel instances, runs random actions
