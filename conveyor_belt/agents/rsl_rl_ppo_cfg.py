@@ -13,7 +13,7 @@ class ConveyorBeltPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     """On-policy PPO runner tuned for the conveyor-belt pick task."""
 
     seed: int = 42
-    num_steps_per_env: int = 24
+    num_steps_per_env: int = 48
     max_iterations: int = 5000
     save_interval: int = 100
     experiment_name: str = "conveyor_belt"
@@ -41,7 +41,7 @@ class ConveyorBeltPPORunnerCfg(RslRlOnPolicyRunnerCfg):
         clip_param=0.2,
         entropy_coef=0.001,
         num_learning_epochs=5,
-        num_mini_batches=4,
+        num_mini_batches=8,
         learning_rate=3e-4,
         schedule="adaptive",
         gamma=0.99,

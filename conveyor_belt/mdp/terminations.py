@@ -15,32 +15,35 @@ if TYPE_CHECKING:
     from isaaclab.sensors import FrameTransformer
 
 
-def any_object_out_of_bounds(
+def all_objects_out_of_bounds(
     env: ManagerBasedRLEnv,
     object_names: list[str],
     x_bounds: tuple[float, float],
     y_bounds: tuple[float, float],
     z_min: float,
 ) -> torch.Tensor:
-    """Terminate if *any* object leaves the workspace bounding box (local frame)."""
-    out = torch.zeros(env.num_envs, device=env.device, dtype=torch.bool)
+    """Terminate only when *all* objects have left the workspace bounding box."""
+    all_out = torch.ones(env.num_envs, device=env.device, dtype=torch.bool)
     for name in object_names:
         obj: RigidObject = env.scene[name]
         local_pos = wp.to_torch(obj.data.root_pos_w)[:, :3] - env.scene.env_origins
-        out |= (local_pos[:, 0] < x_bounds[0]) | (local_pos[:, 0] > x_bounds[1])
-        out |= (local_pos[:, 1] < y_bounds[0]) | (local_pos[:, 1] > y_bounds[1])
-        out |= local_pos[:, 2] < z_min
-    return out
+        obj_out = (
+            (local_pos[:, 0] < x_bounds[0]) | (local_pos[:, 0] > x_bounds[1])
+            | (local_pos[:, 1] < y_bounds[0]) | (local_pos[:, 1] > y_bounds[1])
+            | (local_pos[:, 2] < z_min)
+        )
+        all_out &= obj_out
+    return all_out
 
 
 def successful_grasp_lift(
     env: ManagerBasedRLEnv,
     target_height: float,
-    max_distance: float,
+    max_grasp_distance: float = 0.12,
     ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
     object_names: list[str] = ["object_0", "object_1", "object_2"],
 ) -> torch.Tensor:
-    """Terminate (success) when any object is lifted to ``target_height`` near the EE."""
+    """Terminate (success) when any object is above target_height AND held near gripper."""
     ee_frame: FrameTransformer = env.scene[ee_frame_cfg.name]
     ee_pos_w = wp.to_torch(ee_frame.data.target_pos_w)[..., 0, :]
 
@@ -50,5 +53,5 @@ def successful_grasp_lift(
         obj_pos_w = wp.to_torch(obj.data.root_pos_w)[:, :3]
         dist = torch.norm(obj_pos_w - ee_pos_w, dim=-1)
         local_z = obj_pos_w[:, 2] - env.scene.env_origins[:, 2]
-        success |= (local_z > target_height) & (dist < max_distance)
+        success |= (local_z > target_height) & (dist < max_grasp_distance)
     return success

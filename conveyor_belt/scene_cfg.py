@@ -99,7 +99,7 @@ OBJECT_SPAWN_Z = (
 )
 
 # Default belt velocity (m/s).  -y = objects travel right-to-left.
-CONVEYOR_VELOCITY = (0.0, -0.08, 0.0)
+CONVEYOR_VELOCITY = (0.0, -0.05, 0.0)
 
 # ---------------------------------------------------------------------------
 # Helpers

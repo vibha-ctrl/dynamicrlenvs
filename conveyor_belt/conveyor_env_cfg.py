@@ -35,7 +35,7 @@ from .scene_cfg import ConveyorSceneCfg
 
 OBJECT_NAMES: list[str] = ["object_0", "object_1", "object_2"]
 
-CONVEYOR_SPEED = (0.0, -0.08, 0.0)  # m/s along -y
+CONVEYOR_SPEED = (0.0, -0.05, 0.0)  # m/s along -y
 CONVEYOR_BELT_NOISE = 0.005         # ± m/s — belt speed variation (small)
 CONVEYOR_OBJECT_NOISE = 0.02        # ± m/s — per-object spawn velocity spread
 
@@ -162,29 +162,49 @@ class EventCfg:
 
 @configclass
 class RewardsCfg:
-    """Reward terms (dense + sparse)."""
+    """Progress-based rewards: pay for *improving*, not for *being*.
+
+    - approach: dense, turns off after grasp
+    - grasp_event: one-time bonus on first grasp
+    - lift_progress: delta-height reward (zero for hovering)
+    - milestones: one-time bonuses at 8/12/16 cm
+    - success_reward: large terminal bonus (gated on controlled grasp)
+    - time_cost: small per-step penalty to encourage finishing fast
+    """
 
     approach_object = RewTerm(
-        func=mdp.closest_object_ee_distance,
+        func=mdp.approach_object,
         params={"std": 0.1, "object_names": OBJECT_NAMES},
-        weight=1.0,
+        weight=2.0,
     )
 
-    lift_object = RewTerm(
-        func=mdp.any_object_lifted,
-        params={"minimal_height": 0.08, "object_names": OBJECT_NAMES},
-        weight=15.0,
-    )
-
-    grasp_lift = RewTerm(
-        func=mdp.grasp_and_lift,
+    grasp_event = RewTerm(
+        func=mdp.grasp_event,
         params={
             "minimal_height": 0.08,
-            "max_grasp_distance": 0.06,
+            "max_grasp_distance": 0.08,
             "object_names": OBJECT_NAMES,
         },
-        weight=10.0,
+        weight=5.0,
     )
+
+    lift_progress = RewTerm(
+        func=mdp.lift_progress,
+        params={"object_names": OBJECT_NAMES},
+        weight=100.0,
+    )
+
+    success_reward = RewTerm(
+        func=mdp.success_bonus,
+        params={
+            "target_height": 0.20,
+            "max_grasp_distance": 0.12,
+            "object_names": OBJECT_NAMES,
+        },
+        weight=500.0,
+    )
+
+    time_cost = RewTerm(func=mdp.alive_cost, weight=-0.01)
 
     action_rate = RewTerm(func=mdp.action_rate_l2, weight=-1e-4)
 
@@ -207,7 +227,7 @@ class TerminationsCfg:
     time_out = DoneTerm(func=mdp.time_out, time_out=True)
 
     object_out_of_bounds = DoneTerm(
-        func=mdp.any_object_out_of_bounds,
+        func=mdp.all_objects_out_of_bounds,
         params={
             "object_names": OBJECT_NAMES,
             "x_bounds": (-0.1, 1.0),
@@ -220,7 +240,7 @@ class TerminationsCfg:
         func=mdp.successful_grasp_lift,
         params={
             "target_height": 0.20,
-            "max_distance": 0.08,
+            "max_grasp_distance": 0.12,
             "object_names": OBJECT_NAMES,
         },
     )
@@ -245,7 +265,7 @@ class ConveyorBeltEnvCfg(ManagerBasedRLEnvCfg):
     def __post_init__(self) -> None:
         """Post-initialisation: simulation parameters."""
         self.decimation = 2
-        self.episode_length_s = 16.0
+        self.episode_length_s = 20.0
         # sim
         self.sim.dt = 0.01  # 100 Hz physics
         self.sim.render_interval = self.decimation
