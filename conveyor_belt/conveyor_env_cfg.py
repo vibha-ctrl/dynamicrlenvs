@@ -278,7 +278,7 @@ class TerminationsCfg:
 class ConveyorBeltEnvCfg(ManagerBasedRLEnvCfg):
     """Full configuration for the conveyor-belt pick environment."""
 
-    scene: ConveyorSceneCfg = ConveyorSceneCfg(num_envs=4096, env_spacing=2.5)
+    scene: ConveyorSceneCfg = ConveyorSceneCfg(num_envs=4096, env_spacing=8.0)
     viewer: ViewerCfg = ViewerCfg(
         eye=(1.5, -1.5, 1.0),
         lookat=(0.5, 0.0, 0.2),
@@ -301,6 +301,6 @@ class ConveyorBeltEnvCfg(ManagerBasedRLEnvCfg):
         self.sim.physics = PhysxCfg(
             bounce_threshold_velocity=0.2,
             gpu_found_lost_aggregate_pairs_capacity=1024 * 1024 * 4,
-            gpu_total_aggregate_pairs_capacity=16 * 1024,
+            gpu_total_aggregate_pairs_capacity=256 * 1024,
             friction_correlation_distance=0.00625,
         )
