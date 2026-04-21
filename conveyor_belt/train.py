@@ -18,7 +18,7 @@ parser = argparse.ArgumentParser(description="Train PPO on Conveyor Belt task.")
 parser.add_argument("--num_envs", type=int, default=256)
 parser.add_argument("--max_iterations", type=int, default=1500)
 parser.add_argument("--seed", type=int, default=42)
-parser.add_argument("--eval_interval", type=int, default=500,
+parser.add_argument("--eval_interval", type=int, default=50,
                     help="Run deterministic eval every N iterations (0 to disable).")
 parser.add_argument("--video", action="store_true")
 parser.add_argument("--disable_fabric", action="store_true", default=False)

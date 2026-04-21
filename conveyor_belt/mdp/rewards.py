@@ -3,6 +3,11 @@
 All rewards are either one-time events or progress-based.  No reward is
 given for *being* in a state — only for *reaching* it or *improving*.
 This prevents the agent from camping at an intermediate height.
+
+Each env has a randomly assigned **target object** (set by the
+``randomise_target_object`` event).  Only the target object is considered
+for approach / grasp / lift / success rewards, forcing the policy to
+learn to pick *any* of the 3 objects.
 """
 
 from __future__ import annotations
@@ -33,28 +38,37 @@ def _detect_resets(env: ManagerBasedRLEnv, key: str) -> torch.Tensor:
     return just_reset
 
 
-def _best_grasped_height(
+def _target_obj_state(
+    env: ManagerBasedRLEnv,
+    object_names: list[str],
+) -> torch.Tensor:
+    """Return ``(num_envs, 3)`` world-frame position of each env's target object."""
+    idx = env._target_object_idx  # (num_envs,) long
+    all_pos = torch.stack(
+        [wp.to_torch(env.scene[name].data.root_pos_w)[:, :3] for name in object_names],
+        dim=1,
+    )  # (num_envs, num_objects, 3)
+    return all_pos[torch.arange(env.num_envs, device=env.device), idx]  # (num_envs, 3)
+
+
+def _target_grasped_height(
     env: ManagerBasedRLEnv,
     ee_frame_cfg: SceneEntityCfg,
     object_names: list[str],
     max_dist: float = 0.15,
 ) -> torch.Tensor:
-    """Height of the highest object within *max_dist* of the gripper."""
+    """Height of the target object if it is within *max_dist* of the gripper, else 0."""
     ee_frame: FrameTransformer = env.scene[ee_frame_cfg.name]
     ee_pos_w = wp.to_torch(ee_frame.data.target_pos_w)[..., 0, :]
+    obj_pos_w = _target_obj_state(env, object_names)
 
-    best = torch.zeros(env.num_envs, device=env.device)
-    for name in object_names:
-        obj: RigidObject = env.scene[name]
-        obj_pos_w = wp.to_torch(obj.data.root_pos_w)[:, :3]
-        dist = torch.norm(obj_pos_w - ee_pos_w, dim=-1)
-        local_z = obj_pos_w[:, 2] - env.scene.env_origins[:, 2]
-        near = dist < max_dist
-        best = torch.maximum(best, local_z * near.float())
-    return best
+    dist = torch.norm(obj_pos_w - ee_pos_w, dim=-1)
+    local_z = obj_pos_w[:, 2] - env.scene.env_origins[:, 2]
+    near = (dist < max_dist).float()
+    return local_z * near
 
 
-# ── 1. approach (turns off after grasp) ──────────────────────────────────
+# ── 1. approach (target object only) ─────────────────────────────────────
 
 def approach_object(
     env: ManagerBasedRLEnv,
@@ -62,18 +76,13 @@ def approach_object(
     ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
     object_names: list[str] = ["object_0", "object_1", "object_2"],
 ) -> torch.Tensor:
-    """Tanh-kernel approach reward — always active."""
+    """Tanh-kernel approach reward toward the target object."""
     ee_frame: FrameTransformer = env.scene[ee_frame_cfg.name]
     ee_pos_w = wp.to_torch(ee_frame.data.target_pos_w)[..., 0, :]
+    obj_pos_w = _target_obj_state(env, object_names)
 
-    min_dist = torch.full((env.num_envs,), float("inf"), device=env.device)
-    for name in object_names:
-        obj: RigidObject = env.scene[name]
-        obj_pos_w = wp.to_torch(obj.data.root_pos_w)[:, :3]
-        dist = torch.norm(obj_pos_w - ee_pos_w, dim=-1)
-        min_dist = torch.minimum(min_dist, dist)
-
-    return 1.0 - torch.tanh(min_dist / std)
+    dist = torch.norm(obj_pos_w - ee_pos_w, dim=-1)
+    return 1.0 - torch.tanh(dist / std)
 
 
 # ── 2. one-time grasp event ─────────────────────────────────────────────
@@ -85,7 +94,7 @@ def grasp_event(
     ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
     object_names: list[str] = ["object_0", "object_1", "object_2"],
 ) -> torch.Tensor:
-    """One-time bonus when the robot first grasps and lifts an object."""
+    """One-time bonus when the robot first grasps and lifts the target object."""
     if not hasattr(env, "_grasp_event_given"):
         env._grasp_event_given = torch.zeros(env.num_envs, device=env.device, dtype=torch.bool)
 
@@ -93,14 +102,11 @@ def grasp_event(
 
     ee_frame: FrameTransformer = env.scene[ee_frame_cfg.name]
     ee_pos_w = wp.to_torch(ee_frame.data.target_pos_w)[..., 0, :]
+    obj_pos_w = _target_obj_state(env, object_names)
 
-    currently_grasped = torch.zeros(env.num_envs, device=env.device, dtype=torch.bool)
-    for name in object_names:
-        obj: RigidObject = env.scene[name]
-        obj_pos_w = wp.to_torch(obj.data.root_pos_w)[:, :3]
-        dist = torch.norm(obj_pos_w - ee_pos_w, dim=-1)
-        local_z = obj_pos_w[:, 2] - env.scene.env_origins[:, 2]
-        currently_grasped |= (dist < max_grasp_distance) & (local_z > minimal_height)
+    dist = torch.norm(obj_pos_w - ee_pos_w, dim=-1)
+    local_z = obj_pos_w[:, 2] - env.scene.env_origins[:, 2]
+    currently_grasped = (dist < max_grasp_distance) & (local_z > minimal_height)
 
     new_grasp = currently_grasped & ~env._grasp_event_given
     env._grasp_event_given |= currently_grasped
@@ -114,13 +120,13 @@ def lift_progress(
     ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
     object_names: list[str] = ["object_0", "object_1", "object_2"],
 ) -> torch.Tensor:
-    """Reward only for *new* upward progress.  Hovering pays nothing."""
+    """Reward only for *new* upward progress of the target object."""
     if not hasattr(env, "_lift_best_height"):
         env._lift_best_height = torch.zeros(env.num_envs, device=env.device)
 
     env._lift_best_height[_detect_resets(env, "lift")] = 0.0
 
-    current = _best_grasped_height(env, ee_frame_cfg, object_names)
+    current = _target_grasped_height(env, ee_frame_cfg, object_names)
     progress = torch.clamp(current - env._lift_best_height, min=0.0)
     env._lift_best_height = torch.maximum(env._lift_best_height, current)
     return progress
@@ -133,11 +139,7 @@ def height_milestones(
     ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
     object_names: list[str] = ["object_0", "object_1", "object_2"],
 ) -> torch.Tensor:
-    """One-time bonuses at 8 / 12 / 16 cm while object is near gripper.
-
-    Returns the sum of newly-crossed milestone values.  Use weight=1.0
-    in the config since bonus magnitudes are baked in.
-    """
+    """One-time bonuses at 8 / 12 / 16 cm while target object is near gripper."""
     thresholds = torch.tensor([0.08, 0.12, 0.16], device=env.device)
     bonuses = torch.tensor([10.0, 20.0, 30.0], device=env.device)
     n = len(thresholds)
@@ -147,7 +149,7 @@ def height_milestones(
 
     env._milestones_hit[_detect_resets(env, "milestone")] = False
 
-    best_h = _best_grasped_height(env, ee_frame_cfg, object_names)
+    best_h = _target_grasped_height(env, ee_frame_cfg, object_names)
 
     reward = torch.zeros(env.num_envs, device=env.device)
     for i in range(n):
@@ -166,17 +168,14 @@ def success_bonus(
     ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
     object_names: list[str] = ["object_0", "object_1", "object_2"],
 ) -> torch.Tensor:
-    """Large reward when any object is above target_height AND near gripper."""
+    """Large reward when the target object is above target_height AND near gripper."""
     ee_frame: FrameTransformer = env.scene[ee_frame_cfg.name]
     ee_pos_w = wp.to_torch(ee_frame.data.target_pos_w)[..., 0, :]
+    obj_pos_w = _target_obj_state(env, object_names)
 
-    success = torch.zeros(env.num_envs, device=env.device, dtype=torch.bool)
-    for name in object_names:
-        obj: RigidObject = env.scene[name]
-        obj_pos_w = wp.to_torch(obj.data.root_pos_w)[:, :3]
-        dist = torch.norm(obj_pos_w - ee_pos_w, dim=-1)
-        local_z = obj_pos_w[:, 2] - env.scene.env_origins[:, 2]
-        success |= (local_z > target_height) & (dist < max_grasp_distance)
+    dist = torch.norm(obj_pos_w - ee_pos_w, dim=-1)
+    local_z = obj_pos_w[:, 2] - env.scene.env_origins[:, 2]
+    success = (local_z > target_height) & (dist < max_grasp_distance)
     return success.float()
 
 

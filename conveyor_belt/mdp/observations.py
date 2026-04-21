@@ -68,3 +68,29 @@ def ee_to_object_vectors(
         obj: RigidObject = env.scene[name]
         parts.append(wp.to_torch(obj.data.root_pos_w)[:, :3] - ee_pos_w)
     return torch.cat(parts, dim=-1)
+
+
+def conveyor_velocity(env: ManagerBasedRLEnv) -> torch.Tensor:
+    """Per-env conveyor belt velocity vector (privileged information).
+
+    Returns shape ``(num_envs, 3)``.  Set by ``reset_conveyor_belt`` in
+    ``events.py`` at the start of each episode.
+    """
+    if not hasattr(env, "_conveyor_vel_per_env"):
+        return torch.zeros(env.num_envs, 3, device=env.device)
+    return env._conveyor_vel_per_env
+
+
+def target_object_one_hot(
+    env: ManagerBasedRLEnv,
+    num_objects: int = 3,
+) -> torch.Tensor:
+    """One-hot encoding of the per-env target object index.
+
+    Returns shape ``(num_envs, num_objects)``.  Set by
+    ``randomise_target_object`` in ``events.py`` at each episode reset.
+    """
+    if not hasattr(env, "_target_object_idx"):
+        return torch.zeros(env.num_envs, num_objects, device=env.device)
+    idx = env._target_object_idx
+    return torch.nn.functional.one_hot(idx, num_classes=num_objects).float()

@@ -33,8 +33,9 @@ from isaaclab.assets import ArticulationCfg, AssetBaseCfg, RigidObjectCfg
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sensors import FrameTransformerCfg
 from isaaclab.sensors.frame_transformer.frame_transformer_cfg import OffsetCfg
-from isaaclab.sim.spawners.from_files.from_files_cfg import GroundPlaneCfg
+from isaaclab.sim.spawners.from_files.from_files_cfg import GroundPlaneCfg, UsdFileCfg
 from isaaclab.utils import configclass
+from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 
 from isaaclab.markers.config import FRAME_MARKER_CFG  # isort: skip
 from isaaclab_assets.robots.franka import FRANKA_PANDA_CFG  # isort: skip
@@ -88,18 +89,40 @@ _PEDESTAL_Z = GROUND_Z + _PEDESTAL_HEIGHT / 2
 _PEDESTAL_COLOR = (0.35, 0.35, 0.38)
 
 # ---------------------------------------------------------------------------
-# Objects
+# Objects (YCB items from Nucleus)
 # ---------------------------------------------------------------------------
 
-OBJECT_SIZE = (0.04, 0.04, 0.04)
-OBJECT_MASS_KG = 0.1
-OBJECT_SPAWN_Z = (
-    CONVEYOR_SURFACE_Z + BELT_THICKNESS / 2 + OBJECT_SIZE[2] / 2
-    + 0.002  # small clearance to avoid first-frame interpenetration with belt
+_YCB_ROOT = f"{ISAAC_NUCLEUS_DIR}/Props/YCB/Axis_Aligned_Physics"
+
+_COMMON_RIGID_PROPS = sim_utils.RigidBodyPropertiesCfg(
+    solver_position_iteration_count=16,
+    solver_velocity_iteration_count=1,
+    max_angular_velocity=100.0,
+    max_linear_velocity=10.0,
+    max_depenetration_velocity=1.0,
+    disable_gravity=False,
 )
 
-# Default belt velocity (m/s).  -y = objects travel right-to-left.
-CONVEYOR_VELOCITY = (0.0, -0.05, 0.0)
+_BELT_TOP = CONVEYOR_SURFACE_Z + BELT_THICKNESS / 2
+
+OBJECT_SCALE = (0.65, 0.65, 0.65)
+
+OBJECT_HALF_HEIGHTS: dict[str, float] = {
+    "sugar_box": 0.088 * OBJECT_SCALE[2],
+    "soup_can": 0.051 * OBJECT_SCALE[2],
+    "mustard_bottle": 0.096 * OBJECT_SCALE[2],
+}
+
+_UPRIGHT_QUATS = {
+    "sugar_box":      [-0.7071, 0.0, 0.0, 0.7071],  # -90° about X in xyzw
+    "soup_can":       [-0.7071, 0.0, 0.0, 0.7071],  # -90° about X in xyzw
+    "mustard_bottle": [-0.7071, 0.0, 0.0, 0.7071],  # -90° about X in xyzw
+}
+
+OBJECT_SPAWN_Z_SUGAR = _BELT_TOP + OBJECT_HALF_HEIGHTS["sugar_box"] + 0.002
+OBJECT_SPAWN_Z_SOUP = _BELT_TOP + OBJECT_HALF_HEIGHTS["soup_can"] + 0.002
+OBJECT_SPAWN_Z_MUSTARD = _BELT_TOP + OBJECT_HALF_HEIGHTS["mustard_bottle"] + 0.002
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -110,25 +133,14 @@ _ee_marker_cfg.markers["frame"].scale = (0.1, 0.1, 0.1)
 _ee_marker_cfg.prim_path = "/Visuals/FrameTransformer"
 
 
-def _object_spawn_cfg(color: tuple[float, float, float]) -> sim_utils.CuboidCfg:
-    """Return a CuboidCfg for one conveyor object."""
-    return sim_utils.CuboidCfg(
-        size=OBJECT_SIZE,
-        rigid_props=sim_utils.RigidBodyPropertiesCfg(
-            solver_position_iteration_count=16,
-            solver_velocity_iteration_count=1,
-            max_angular_velocity=100.0,
-            max_linear_velocity=10.0,
-            max_depenetration_velocity=1.0,
-            disable_gravity=False,
-        ),
-        mass_props=sim_utils.MassPropertiesCfg(mass=OBJECT_MASS_KG),
+def _ycb_spawn_cfg(usd_name: str, mass: float = 0.2) -> UsdFileCfg:
+    """Return a UsdFileCfg for a YCB object on the conveyor."""
+    return UsdFileCfg(
+        usd_path=f"{_YCB_ROOT}/{usd_name}",
+        scale=OBJECT_SCALE,
+        rigid_props=_COMMON_RIGID_PROPS,
+        mass_props=sim_utils.MassPropertiesCfg(mass=mass),
         collision_props=sim_utils.CollisionPropertiesCfg(),
-        physics_material=sim_utils.RigidBodyMaterialCfg(
-            static_friction=0.5,
-            dynamic_friction=0.3,
-        ),
-        visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=color),
     )
 
 
@@ -168,7 +180,7 @@ _BELT_COLOR = (0.22, 0.22, 0.26)
 
 @configclass
 class ConveyorSceneCfg(InteractiveSceneCfg):
-    """Scene with a Franka Panda, a driven conveyor belt, and three rigid cubes.
+    """Scene with a Franka Panda, a driven conveyor belt, and three YCB objects.
 
     The belt is a **tracked RigidObject** so its velocity can be set by an
     event term – the same approach the Isaac Sim Conveyor Belt Utility uses
@@ -224,8 +236,8 @@ class ConveyorSceneCfg(InteractiveSceneCfg):
         prim_path="{ENV_REGEX_NS}/ConveyorBelt",
         init_state=RigidObjectCfg.InitialStateCfg(
             pos=[BELT_CENTER_X, 0.0, CONVEYOR_SURFACE_Z],
-            rot=[1, 0, 0, 0],
-            lin_vel=list(CONVEYOR_VELOCITY),
+            rot=[0, 0, 0, 1],
+            lin_vel=[0.0, 0.0, 0.0],  # randomised per-env at reset
         ),
         spawn=sim_utils.CuboidCfg(
             size=(BELT_WIDTH, BELT_LENGTH, BELT_THICKNESS),
@@ -330,34 +342,34 @@ class ConveyorSceneCfg(InteractiveSceneCfg):
         ),
     )
 
-    # -- Rigid objects on conveyor --------------------------------------------
+    # -- Rigid objects on conveyor (YCB items) ---------------------------------
     # Objects start in the upper half of the belt (positive Y) and travel
     # toward the robot in the -Y direction.
     object_0: RigidObjectCfg = RigidObjectCfg(
         prim_path="{ENV_REGEX_NS}/Object_0",
         init_state=RigidObjectCfg.InitialStateCfg(
-            pos=[0.50, 0.35, OBJECT_SPAWN_Z],
-            rot=[1, 0, 0, 0],
+            pos=[0.50, 0.35, OBJECT_SPAWN_Z_SUGAR],
+            rot=_UPRIGHT_QUATS["sugar_box"],
         ),
-        spawn=_object_spawn_cfg(color=(0.85, 0.15, 0.15)),
+        spawn=_ycb_spawn_cfg("004_sugar_box.usd", mass=0.5),
     )
 
     object_1: RigidObjectCfg = RigidObjectCfg(
         prim_path="{ENV_REGEX_NS}/Object_1",
         init_state=RigidObjectCfg.InitialStateCfg(
-            pos=[0.45, 0.15, OBJECT_SPAWN_Z],
-            rot=[1, 0, 0, 0],
+            pos=[0.45, 0.15, OBJECT_SPAWN_Z_SOUP],
+            rot=_UPRIGHT_QUATS["soup_can"],
         ),
-        spawn=_object_spawn_cfg(color=(0.15, 0.75, 0.15)),
+        spawn=_ycb_spawn_cfg("005_tomato_soup_can.usd", mass=0.35),
     )
 
     object_2: RigidObjectCfg = RigidObjectCfg(
         prim_path="{ENV_REGEX_NS}/Object_2",
         init_state=RigidObjectCfg.InitialStateCfg(
-            pos=[0.55, -0.05, OBJECT_SPAWN_Z],
-            rot=[1, 0, 0, 0],
+            pos=[0.55, -0.05, OBJECT_SPAWN_Z_MUSTARD],
+            rot=_UPRIGHT_QUATS["mustard_bottle"],
         ),
-        spawn=_object_spawn_cfg(color=(0.15, 0.15, 0.85)),
+        spawn=_ycb_spawn_cfg("006_mustard_bottle.usd", mass=0.4),
     )
 
     # -- Ground plane ---------------------------------------------------------

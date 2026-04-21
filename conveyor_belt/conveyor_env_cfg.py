@@ -1,6 +1,6 @@
 """Manager-based RL environment configuration for conveyor-belt manipulation.
 
-A Franka Panda must pick rigid cubes from a simulated moving conveyor belt.
+A Franka Panda must pick YCB objects from a simulated moving conveyor belt.
 
 Conveyor physics
 ~~~~~~~~~~~~~~~~
@@ -35,7 +35,7 @@ from .scene_cfg import ConveyorSceneCfg
 
 OBJECT_NAMES: list[str] = ["object_0", "object_1", "object_2"]
 
-CONVEYOR_SPEED = (0.0, -0.05, 0.0)  # m/s along -y
+CONVEYOR_SPEED_RANGE = (0.03, 0.10)  # m/s — per-env speed sampled uniformly
 CONVEYOR_BELT_NOISE = 0.005         # ± m/s — belt speed variation (small)
 CONVEYOR_OBJECT_NOISE = 0.02        # ± m/s — per-object spawn velocity spread
 
@@ -90,6 +90,11 @@ class ObservationsCfg:
             func=mdp.ee_to_object_vectors,
             params={"object_names": OBJECT_NAMES},
         )
+        conveyor_velocity = ObsTerm(func=mdp.conveyor_velocity)
+        target_object = ObsTerm(
+            func=mdp.target_object_one_hot,
+            params={"num_objects": len(OBJECT_NAMES)},
+        )
         last_actions = ObsTerm(func=mdp.last_action)
 
         def __post_init__(self) -> None:
@@ -104,10 +109,21 @@ class ObservationsCfg:
 # ---------------------------------------------------------------------------
 
 
-_BELT_PARAMS = {
+_BELT_RESET_PARAMS = {
     "belt_cfg": SceneEntityCfg("conveyor_belt"),
-    "conveyor_velocity": CONVEYOR_SPEED,
+    "speed_range": CONVEYOR_SPEED_RANGE,
     "velocity_noise": CONVEYOR_BELT_NOISE,
+}
+
+_BELT_DRIVE_PARAMS = {
+    "belt_cfg": SceneEntityCfg("conveyor_belt"),
+}
+
+
+_UPRIGHT_QUATS = {
+    "object_0": (-0.7071, 0.0, 0.0, 0.7071),  # -90° about X in xyzw
+    "object_1": (-0.7071, 0.0, 0.0, 0.7071),  # -90° about X in xyzw
+    "object_2": (-0.7071, 0.0, 0.0, 0.7071),  # -90° about X in xyzw
 }
 
 
@@ -118,10 +134,10 @@ def _object_reset_term(asset_name: str) -> EventTerm:
         mode="reset",
         params={
             "asset_cfg": SceneEntityCfg(asset_name),
-            "pose_range": {"x": (-0.06, 0.06), "y": (-0.15, 0.15)},
-            "yaw_range": (-0.5, 0.5),
-            "conveyor_velocity": CONVEYOR_SPEED,
+            "pose_range": {"x": (-0.08, 0.08), "y": (-0.15, 0.15)},
+            "yaw_range": (0.0, 0.0),
             "velocity_noise": CONVEYOR_OBJECT_NOISE,
+            "upright_quat": _UPRIGHT_QUATS[asset_name],
         },
     )
 
@@ -136,7 +152,14 @@ class EventCfg:
     reset_belt = EventTerm(
         func=mdp.reset_conveyor_belt,
         mode="reset",
-        params=_BELT_PARAMS,
+        params=_BELT_RESET_PARAMS,
+    )
+
+    # -- target object selection -----------------------------------------------
+    reset_target = EventTerm(
+        func=mdp.randomise_target_object,
+        mode="reset",
+        params={"num_objects": len(OBJECT_NAMES)},
     )
 
     # -- per-object reset (position / orientation / velocity) -----------------
@@ -151,7 +174,7 @@ class EventCfg:
         func=mdp.drive_conveyor_belt,
         mode="interval",
         interval_range_s=(0.05, 0.05),
-        params=_BELT_PARAMS,
+        params=_BELT_DRIVE_PARAMS,
     )
 
 

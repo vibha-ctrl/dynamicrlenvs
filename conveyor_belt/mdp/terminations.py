@@ -43,15 +43,17 @@ def successful_grasp_lift(
     ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
     object_names: list[str] = ["object_0", "object_1", "object_2"],
 ) -> torch.Tensor:
-    """Terminate (success) when any object is above target_height AND held near gripper."""
+    """Terminate (success) when the **target object** is above target_height AND held near gripper."""
     ee_frame: FrameTransformer = env.scene[ee_frame_cfg.name]
     ee_pos_w = wp.to_torch(ee_frame.data.target_pos_w)[..., 0, :]
 
-    success = torch.zeros(env.num_envs, device=env.device, dtype=torch.bool)
-    for name in object_names:
-        obj: RigidObject = env.scene[name]
-        obj_pos_w = wp.to_torch(obj.data.root_pos_w)[:, :3]
-        dist = torch.norm(obj_pos_w - ee_pos_w, dim=-1)
-        local_z = obj_pos_w[:, 2] - env.scene.env_origins[:, 2]
-        success |= (local_z > target_height) & (dist < max_grasp_distance)
-    return success
+    idx = env._target_object_idx  # (num_envs,) long
+    all_pos = torch.stack(
+        [wp.to_torch(env.scene[name].data.root_pos_w)[:, :3] for name in object_names],
+        dim=1,
+    )  # (num_envs, num_objects, 3)
+    obj_pos_w = all_pos[torch.arange(env.num_envs, device=env.device), idx]
+
+    dist = torch.norm(obj_pos_w - ee_pos_w, dim=-1)
+    local_z = obj_pos_w[:, 2] - env.scene.env_origins[:, 2]
+    return (local_z > target_height) & (dist < max_grasp_distance)
