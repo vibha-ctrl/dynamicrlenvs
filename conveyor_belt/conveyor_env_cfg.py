@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from isaaclab_physx.physics import PhysxCfg
 
-from isaaclab.envs import ManagerBasedRLEnvCfg
+from isaaclab.envs import ManagerBasedRLEnvCfg, ViewerCfg
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab.managers import ObservationTermCfg as ObsTerm
@@ -256,6 +256,11 @@ class ConveyorBeltEnvCfg(ManagerBasedRLEnvCfg):
     """Full configuration for the conveyor-belt pick environment."""
 
     scene: ConveyorSceneCfg = ConveyorSceneCfg(num_envs=4096, env_spacing=2.5)
+    viewer: ViewerCfg = ViewerCfg(
+        eye=(1.5, -1.5, 1.0),
+        lookat=(0.5, 0.0, 0.2),
+        resolution=(1280, 720),
+    )
     observations: ObservationsCfg = ObservationsCfg()
     actions: ActionsCfg = ActionsCfg()
     rewards: RewardsCfg = RewardsCfg()
