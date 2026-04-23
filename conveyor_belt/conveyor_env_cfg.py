@@ -197,7 +197,7 @@ class RewardsCfg:
 
     approach_object = RewTerm(
         func=mdp.approach_object,
-        params={"std": 0.1, "object_names": OBJECT_NAMES},
+        params={"std": 0.2, "object_names": OBJECT_NAMES},
         weight=2.0,
     )
 
@@ -208,13 +208,13 @@ class RewardsCfg:
             "max_grasp_distance": 0.08,
             "object_names": OBJECT_NAMES,
         },
-        weight=5.0,
+        weight=50.0,
     )
 
     lift_progress = RewTerm(
         func=mdp.lift_progress,
         params={"object_names": OBJECT_NAMES},
-        weight=100.0,
+        weight=300.0,
     )
 
     success_reward = RewTerm(
@@ -235,6 +235,35 @@ class RewardsCfg:
         func=mdp.joint_vel_l2,
         weight=-1e-4,
         params={"asset_cfg": SceneEntityCfg("robot")},
+    )
+
+    # Top-down orientation reward: encourage the gripper z-axis to point
+    # downward when approaching the target. This is the main fix for upright
+    # YCB objects (bottle / can) getting knocked over by sideways approach.
+    gripper_downward = RewTerm(
+        func=mdp.gripper_downward,
+        params={"max_distance": 0.20, "object_names": OBJECT_NAMES},
+        weight=1.0,
+    )
+
+    # Gripper shaping -------------------------------------------------------
+    # Encourage closing the gripper when near the target object. Gated on
+    # proximity (<10 cm) so the agent cannot hack it by closing immediately.
+    gripper_close = RewTerm(
+        func=mdp.gripper_close_near_target,
+        params={
+            "max_distance": 0.10,
+            "object_names": OBJECT_NAMES,
+        },
+        weight=0.5,
+    )
+
+    # Heavy penalty for *reopening* the gripper after it has been closed
+    # at any point in the episode. Applied every step the gripper is open
+    # post-close, so it strongly dominates any temptation to re-grasp.
+    gripper_reopen = RewTerm(
+        func=mdp.gripper_reopen_penalty,
+        weight=-2.0,
     )
 
 

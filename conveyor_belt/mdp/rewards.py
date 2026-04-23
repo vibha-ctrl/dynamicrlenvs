@@ -18,6 +18,7 @@ import torch
 import warp as wp
 
 from isaaclab.managers import SceneEntityCfg
+from isaaclab.utils.math import quat_apply
 
 if TYPE_CHECKING:
     from isaaclab.assets import RigidObject
@@ -184,3 +185,95 @@ def success_bonus(
 def alive_cost(env: ManagerBasedRLEnv) -> torch.Tensor:
     """Constant 1.0 per step.  Use a negative weight (e.g. -0.01)."""
     return torch.ones(env.num_envs, device=env.device)
+
+
+# ── 7. gripper shaping ───────────────────────────────────────────────────
+
+def _gripper_close_cmd(env: ManagerBasedRLEnv) -> torch.Tensor:
+    """Return bool mask (num_envs,) for whether the gripper was commanded to close.
+
+    BinaryJointPositionAction treats raw_action > 0 as "close".
+    """
+    term = env.action_manager.get_term("gripper_action")
+    raw = term.raw_actions  # (N, 1) or (N,)
+    if raw.dim() > 1:
+        raw = raw[:, 0]
+    return raw > 0.0
+
+
+def gripper_close_near_target(
+    env: ManagerBasedRLEnv,
+    max_distance: float = 0.10,
+    ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
+    object_names: list[str] = ["object_0", "object_1", "object_2"],
+) -> torch.Tensor:
+    """Reward per step when the gripper is commanded closed *and* EE is near target.
+
+    Gated on proximity so the agent can't hack the reward by simply closing
+    the gripper immediately on reset.
+    """
+    ee_frame: FrameTransformer = env.scene[ee_frame_cfg.name]
+    ee_pos_w = wp.to_torch(ee_frame.data.target_pos_w)[..., 0, :]
+    obj_pos_w = _target_obj_state(env, object_names)
+
+    dist = torch.norm(obj_pos_w - ee_pos_w, dim=-1)
+    near = dist < max_distance
+    closed = _gripper_close_cmd(env)
+    return (closed & near).float()
+
+
+def gripper_reopen_penalty(env: ManagerBasedRLEnv) -> torch.Tensor:
+    """Penalise *opening* the gripper at any point after it has ever been closed.
+
+    Sticky within an episode: once the gripper closes, every subsequent step
+    in which it is commanded open contributes +1 to this term (use a
+    **negative weight**). Cleared on reset.
+    """
+    if not hasattr(env, "_gripper_has_closed"):
+        env._gripper_has_closed = torch.zeros(
+            env.num_envs, device=env.device, dtype=torch.bool
+        )
+
+    env._gripper_has_closed[_detect_resets(env, "gripper_reopen")] = False
+
+    closed_now = _gripper_close_cmd(env)
+    open_now = ~closed_now
+
+    penalty = env._gripper_has_closed & open_now
+    env._gripper_has_closed |= closed_now
+    return penalty.float()
+
+
+# ── 8. top-down orientation reward ───────────────────────────────────────
+
+def gripper_downward(
+    env: ManagerBasedRLEnv,
+    max_distance: float = 0.20,
+    ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
+    object_names: list[str] = ["object_0", "object_1", "object_2"],
+) -> torch.Tensor:
+    """Reward the gripper for pointing downward, gated on proximity to target.
+
+    The Franka ``panda_hand`` local +Z axis points out of the gripper along
+    the grasp direction.  A top-down grasp thus means the world-frame Z
+    component of that axis is ``-1``.  Returns ``score * near`` where:
+
+    - ``score = -world_z[:, 2]`` → ``+1`` when pointing straight down,
+      ``0`` horizontal, ``-1`` pointing up.
+    - ``near  = 1`` when EE is within ``max_distance`` of the target object,
+      else ``0``.
+    """
+    ee_frame: FrameTransformer = env.scene[ee_frame_cfg.name]
+    ee_pos_w = wp.to_torch(ee_frame.data.target_pos_w)[..., 0, :]
+    ee_quat_w = wp.to_torch(ee_frame.data.target_quat_w)[..., 0, :]  # (N, 4) xyzw
+
+    local_z = torch.zeros(env.num_envs, 3, device=env.device)
+    local_z[:, 2] = 1.0
+    world_z = quat_apply(ee_quat_w, local_z)  # (N, 3)
+    score = -world_z[:, 2]  # +1 straight down, -1 straight up
+
+    obj_pos_w = _target_obj_state(env, object_names)
+    dist = torch.norm(obj_pos_w - ee_pos_w, dim=-1)
+    near = (dist < max_distance).float()
+
+    return score * near

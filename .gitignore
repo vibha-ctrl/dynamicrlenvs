@@ -7,3 +7,8 @@ build/
 logs/
 *.log
 .venv/
+
+# Local training run state
+*.pid
+train_latest_run.txt
+demos/
