@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from isaaclab_physx.physics import PhysxCfg
 
+import isaaclab.sim as sim_utils
 from isaaclab.envs import ManagerBasedRLEnvCfg, ViewerCfg
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
@@ -321,15 +322,22 @@ class ConveyorBeltEnvCfg(ManagerBasedRLEnvCfg):
 
     def __post_init__(self) -> None:
         """Post-initialisation: simulation parameters."""
-        self.decimation = 2
+        self.decimation = 8
         self.episode_length_s = 20.0
         # sim
-        self.sim.dt = 0.01  # 100 Hz physics
+        self.sim.dt = 0.0025  # 400 Hz physics
         self.sim.render_interval = self.decimation
 
         self.sim.physics = PhysxCfg(
-            bounce_threshold_velocity=0.2,
+            bounce_threshold_velocity=0.05,
             gpu_found_lost_aggregate_pairs_capacity=1024 * 1024 * 4,
             gpu_total_aggregate_pairs_capacity=256 * 1024,
-            friction_correlation_distance=0.00625,
+            friction_correlation_distance=0.0025,
+        )
+
+        self.sim.physics_material = sim_utils.RigidBodyMaterialCfg(
+            static_friction=3.0,
+            dynamic_friction=0.8,
+            friction_combine_mode="max",
+            restitution_combine_mode="max",
         )

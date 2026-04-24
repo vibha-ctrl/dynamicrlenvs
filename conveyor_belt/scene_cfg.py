@@ -95,13 +95,16 @@ _PEDESTAL_COLOR = (0.35, 0.35, 0.38)
 _YCB_ROOT = f"{ISAAC_NUCLEUS_DIR}/Props/YCB/Axis_Aligned_Physics"
 
 _COMMON_RIGID_PROPS = sim_utils.RigidBodyPropertiesCfg(
-    solver_position_iteration_count=16,
-    solver_velocity_iteration_count=1,
+    solver_position_iteration_count=64,
+    solver_velocity_iteration_count=8,
     max_angular_velocity=100.0,
     max_linear_velocity=10.0,
     max_depenetration_velocity=1.0,
     disable_gravity=False,
+    sleep_threshold=0.0,
+    stabilization_threshold=0.0,
 )
+
 
 _BELT_TOP = CONVEYOR_SURFACE_Z + BELT_THICKNESS / 2
 
@@ -134,13 +137,23 @@ _ee_marker_cfg.prim_path = "/Visuals/FrameTransformer"
 
 
 def _ycb_spawn_cfg(usd_name: str, mass: float = 0.2) -> UsdFileCfg:
-    """Return a UsdFileCfg for a YCB object on the conveyor."""
+    """Return a UsdFileCfg for a YCB object on the conveyor.
+
+    Note: UsdFileCfg in this Isaac Lab version does not expose
+    ``physics_material``.  We rely on (1) the per-prim belt material,
+    (2) the global ``sim.physics_material`` with ``friction_combine_mode="max"``
+    (set in conveyor_env_cfg.py) and (3) bumped solver iterations to keep
+    the YCB objects locked to the belt.
+    """
     return UsdFileCfg(
         usd_path=f"{_YCB_ROOT}/{usd_name}",
         scale=OBJECT_SCALE,
         rigid_props=_COMMON_RIGID_PROPS,
         mass_props=sim_utils.MassPropertiesCfg(mass=mass),
-        collision_props=sim_utils.CollisionPropertiesCfg(),
+        collision_props=sim_utils.CollisionPropertiesCfg(
+            contact_offset=0.005,
+            rest_offset=0.0,
+        ),
     )
 
 
@@ -247,10 +260,15 @@ class ConveyorSceneCfg(InteractiveSceneCfg):
                 max_angular_velocity=0.0,
             ),
             mass_props=sim_utils.MassPropertiesCfg(mass=10_000.0),
-            collision_props=sim_utils.CollisionPropertiesCfg(),
+            collision_props=sim_utils.CollisionPropertiesCfg(
+                contact_offset=0.005,
+                rest_offset=0.0,
+            ),
             physics_material=sim_utils.RigidBodyMaterialCfg(
-                static_friction=1.0,
+                static_friction=3.0,
                 dynamic_friction=0.8,
+                friction_combine_mode="max",
+                restitution_combine_mode="max",
             ),
             visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=_BELT_COLOR),
         ),
