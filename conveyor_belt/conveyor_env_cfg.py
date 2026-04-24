@@ -336,7 +336,7 @@ class ConveyorBeltEnvCfg(ManagerBasedRLEnvCfg):
         )
 
         self.sim.physics_material = sim_utils.RigidBodyMaterialCfg(
-            static_friction=3.0,
+            static_friction=1.2,
             dynamic_friction=0.8,
             friction_combine_mode="max",
             restitution_combine_mode="max",
