@@ -36,7 +36,7 @@ from .scene_cfg import ConveyorSceneCfg
 
 OBJECT_NAMES: list[str] = ["object_0", "object_1", "object_2"]
 
-CONVEYOR_SPEED_RANGE = (0.03, 0.10)  # m/s — per-env speed sampled uniformly
+CONVEYOR_SPEED_RANGE = (0.05, 0.35)  # m/s — per-env speed sampled uniformly
 CONVEYOR_BELT_NOISE = 0.005         # ± m/s — belt speed variation (small)
 CONVEYOR_OBJECT_NOISE = 0.02        # ± m/s — per-object spawn velocity spread
 
