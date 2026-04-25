@@ -10,26 +10,18 @@ Usage
 .. code-block:: bash
 
     # Headless (fastest — no GUI window)
-    export VIRTUAL_ENV=~/vibha/venv  # Isaac Lab's isaaclab.sh prefers $VIRTUAL_ENV/bin/python (needs Python >= 3.10)
-    export PYTHONPATH=~/conveyor_belt:$PYTHONPATH
     ~/IsaacLab/isaaclab.sh -p ~/conveyor_belt/test_env.py --num_envs 4 --headless
 
     # With viewer (see the sim in the Omniverse viewport)
     ~/IsaacLab/isaaclab.sh -p ~/conveyor_belt/test_env.py --num_envs 4
 
-    # More steps
-    ~/IsaacLab/isaaclab.sh -p ~/conveyor_belt/test_env.py --num_envs 16 --steps 500
-
-    # Record belt + object world linear velocities for every env, every step
-    ~/IsaacLab/isaaclab.sh -p ~/conveyor_belt/test_env.py --num_envs 4 --steps 500 --record_lin_vel \\
-        --record_lin_vel_path ~/conveyor_belt/conveyor_lin_vel_trace_500.npz
+    # With viser browser viewer (SSH-tunnel port 8080 first)
+    ~/IsaacLab/isaaclab.sh -p ~/conveyor_belt/test_env.py --num_envs 4 --viz viser
 """
 
 from __future__ import annotations
 
 import argparse
-import os
-import sys
 
 # ---------------------------------------------------------------------------
 # Parse CLI & launch sim  (MUST precede any isaaclab imports)
@@ -39,24 +31,6 @@ from isaaclab.app import AppLauncher  # noqa: E402
 parser = argparse.ArgumentParser(description="Smoke-test the conveyor-belt env.")
 parser.add_argument("--num_envs", type=int, default=4, help="Parallel environments.")
 parser.add_argument("--steps", type=int, default=200, help="Env steps to run.")
-parser.add_argument(
-    "--record_lin_vel",
-    action="store_true",
-    default=False,
-    help="Record world-frame linear velocities for belt + 3 objects every env every step.",
-)
-parser.add_argument(
-    "--record_lin_vel_path",
-    type=str,
-    default="conveyor_lin_vel_trace.npz",
-    help="Output path for --record_lin_vel (npz).",
-)
-parser.add_argument(
-    "--static_arm",
-    action="store_true",
-    default=False,
-    help="Send zero actions so the robot stays at default pose (useful for observing belt/objects).",
-)
 parser.add_argument("--disable_fabric", action="store_true", default=False, help="Disable fabric and use USD I/O operations.")
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
@@ -95,46 +69,20 @@ def main() -> None:
 
     # ---- run random actions ----
     total_reward = torch.zeros(args_cli.num_envs, device=obs["policy"].device)
-    episode_lengths = torch.zeros(args_cli.num_envs, device=obs["policy"].device)
     episodes_completed = 0
 
     print(f"  Running {args_cli.steps} steps with random actions ...\n")
 
-    import warp as wp
-
-    if args_cli.record_lin_vel:
-        import numpy as np
-
-        # Shape: (step, env, body, xyz) where body: [belt, obj0, obj1, obj2]
-        vel_log = np.zeros((args_cli.steps, args_cli.num_envs, 4, 3), dtype=np.float32)
-
     for step in range(args_cli.steps):
-        if args_cli.static_arm:
-            action = torch.zeros(env.action_space.shape, device=env.unwrapped.device)
-        else:
-            action = 2 * torch.rand(env.action_space.shape, device=env.unwrapped.device) - 1
+        action = 2 * torch.rand(env.action_space.shape, device=env.unwrapped.device) - 1
         obs, reward, terminated, truncated, info = env.step(action)
-
-        if args_cli.record_lin_vel:
-            scene = env.unwrapped.scene
-            belt_v = wp.to_torch(scene["conveyor_belt"].data.root_lin_vel_w).detach()
-            o0_v = wp.to_torch(scene["object_0"].data.root_lin_vel_w).detach()
-            o1_v = wp.to_torch(scene["object_1"].data.root_lin_vel_w).detach()
-            o2_v = wp.to_torch(scene["object_2"].data.root_lin_vel_w).detach()
-            stacked = torch.stack((belt_v, o0_v, o1_v, o2_v), dim=1)  # (N, 4, 3)
-            vel_log[step] = stacked.cpu().numpy().astype(np.float32, copy=False)
-
         total_reward += reward
-        episode_lengths += 1
 
         done = terminated | truncated
-        num_done = done.sum().item() if isinstance(done, torch.Tensor) else sum(done)
-        if num_done > 0:
-            episodes_completed += int(num_done)
+        episodes_completed += int(done.sum().item() if isinstance(done, torch.Tensor) else sum(done))
 
         if (step + 1) % 50 == 0:
-            mean_rew = total_reward.mean().item()
-            print(f"    step {step+1:>4d}  |  mean cumulative reward: {mean_rew:>8.3f}"
+            print(f"    step {step+1:>4d}  |  mean cumulative reward: {total_reward.mean().item():>8.3f}"
                   f"  |  episodes done so far: {episodes_completed}")
 
     # ---- summary ----
@@ -145,47 +93,6 @@ def main() -> None:
     print(f"  Episodes completed    : {episodes_completed}")
     print(f"  Mean cumulative reward: {total_reward.mean().item():.3f}")
     print(f"  Final obs shape       : {obs['policy'].shape}")
-
-    if args_cli.record_lin_vel:
-        import numpy as np
-
-        out_path = os.path.abspath(args_cli.record_lin_vel_path)
-        out_dir = os.path.dirname(out_path)
-        if out_dir:
-            os.makedirs(out_dir, exist_ok=True)
-        np.savez_compressed(
-            out_path,
-            belt_lin_vel_w=vel_log[:, :, 0, :],
-            object_0_lin_vel_w=vel_log[:, :, 1, :],
-            object_1_lin_vel_w=vel_log[:, :, 2, :],
-            object_2_lin_vel_w=vel_log[:, :, 3, :],
-            meta=np.array(
-                [
-                    args_cli.steps,
-                    args_cli.num_envs,
-                    env_cfg.seed,
-                ],
-                dtype=np.int64,
-            ),
-        )
-        print(f"\n  Saved linear velocity trace: {out_path}")
-        print("    arrays: belt_lin_vel_w, object_{0,1,2}_lin_vel_w  (shape: [steps, num_envs, 3])")
-        print("    meta: [steps, num_envs, seed]")
-
-    # ---- quick physics sanity check ----
-    scene = env.unwrapped.scene
-    belt_pos = wp.to_torch(scene["conveyor_belt"].data.root_pos_w)
-    belt_vel = wp.to_torch(scene["conveyor_belt"].data.root_lin_vel_w)
-    obj0_pos = wp.to_torch(scene["object_0"].data.root_pos_w)
-    obj0_vel = wp.to_torch(scene["object_0"].data.root_lin_vel_w)
-    ee_pos = wp.to_torch(scene["ee_frame"].data.target_pos_w)[..., 0, :]
-
-    print(f"\n  --- Physics snapshot (env 0) ---")
-    print(f"  Belt position : {belt_pos[0].tolist()}")
-    print(f"  Belt velocity : {belt_vel[0].tolist()}")
-    print(f"  Obj 0 position: {obj0_pos[0].tolist()}")
-    print(f"  Obj 0 velocity: {obj0_vel[0].tolist()}")
-    print(f"  EE position   : {ee_pos[0].tolist()}")
     print()
 
     env.close()
