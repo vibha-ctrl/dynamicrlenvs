@@ -116,10 +116,6 @@ _BELT_RESET_PARAMS = {
     "velocity_noise": CONVEYOR_BELT_NOISE,
 }
 
-_BELT_DRIVE_PARAMS = {
-    "belt_cfg": SceneEntityCfg("conveyor_belt"),
-}
-
 
 _UPRIGHT_QUATS = {
     "object_0": (-0.7071, 0.0, 0.0, 0.7071),  # -90° about X in xyzw
@@ -168,14 +164,14 @@ class EventCfg:
     reset_object_1 = _object_reset_term("object_1")
     reset_object_2 = _object_reset_term("object_2")
 
-    # -- conveyor drive (interval, ~20 Hz) ------------------------------------
-    # Mirrors the per-tick OmniGraph evaluation of the IsaacConveyor node
-    # in the Isaac Sim Conveyor Belt Utility.
+    # -- conveyor drive (interval, ~100 Hz) -----------------------------------
+    # Higher frequency = smaller drift per cycle (speed × dt, max ~0.35cm at
+    # 0.35 m/s) and less visible belt oscillation.
     conveyor_drive = EventTerm(
         func=mdp.drive_conveyor_belt,
         mode="interval",
-        interval_range_s=(0.05, 0.05),
-        params=_BELT_DRIVE_PARAMS,
+        interval_range_s=(0.01, 0.01),
+        params={"belt_cfg": SceneEntityCfg("conveyor_belt")},
     )
 
 

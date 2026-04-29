@@ -193,12 +193,7 @@ _BELT_COLOR = (0.22, 0.22, 0.26)
 
 @configclass
 class ConveyorSceneCfg(InteractiveSceneCfg):
-    """Scene with a Franka Panda, a driven conveyor belt, and three YCB objects.
-
-    The belt is a **tracked RigidObject** so its velocity can be set by an
-    event term – the same approach the Isaac Sim Conveyor Belt Utility uses
-    internally (``isaacsim.asset.gen.conveyor``).
-    """
+    """Scene with a Franka Panda, a driven conveyor belt, and three YCB objects."""
 
     # -- Robot ----------------------------------------------------------------
     robot: ArticulationCfg = FRANKA_PANDA_CFG.replace(
@@ -244,13 +239,18 @@ class ConveyorSceneCfg(InteractiveSceneCfg):
         ],
     )
 
-    # -- Conveyor belt (driven rigid body) ------------------------------------
+    # -- Conveyor belt (driven dynamic rigid body) ----------------------------
+    # High mass + gravity disabled: belt is effectively immovable by friction
+    # but has a real simulated velocity that PhysX uses for contact resolution.
+    # Velocity is re-applied every ~50 ms via the tensor API (GPU-compatible);
+    # pose is also reset each tick to counteract the slow translational drift
+    # caused by reaction forces from objects resting on the belt.
     conveyor_belt: RigidObjectCfg = RigidObjectCfg(
         prim_path="{ENV_REGEX_NS}/ConveyorBelt",
         init_state=RigidObjectCfg.InitialStateCfg(
             pos=[BELT_CENTER_X, 0.0, CONVEYOR_SURFACE_Z],
             rot=[0, 0, 0, 1],
-            lin_vel=[0.0, 0.0, 0.0],  # randomised per-env at reset
+            lin_vel=[0.0, 0.0, 0.0],
         ),
         spawn=sim_utils.CuboidCfg(
             size=(BELT_WIDTH, BELT_LENGTH, BELT_THICKNESS),

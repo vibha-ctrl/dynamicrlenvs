@@ -2,20 +2,24 @@
 
 Conveyor physics
 ~~~~~~~~~~~~~~~~
-The Isaac Sim *Conveyor Belt Utility* (``isaacsim.asset.gen.conveyor``)
-works by applying a target velocity to a rigid-body prim every OmniGraph
-tick.  We replicate the same mechanism inside the Isaac Lab manager-based
-workflow:
+The belt is a **high-mass dynamic rigid body** (gravity disabled) whose
+velocity is maintained by an interval event via the tensor API.  High mass
+makes it effectively immovable by friction while still having a real PhysX
+simulated velocity that the contact solver uses to drag objects.
 
 * ``reset_conveyor_belt``  – sets belt pose + velocity on episode reset.
-* ``drive_conveyor_belt``  – interval event that **resets pose and re-applies
-  velocity** each tick, preventing the dynamic belt from drifting in space.
+* ``drive_conveyor_belt``  – interval event (~20 Hz) that resets pose and
+  re-applies velocity each tick, preventing slow translational drift caused
+  by reaction forces from objects resting on the belt.
 * ``reset_object_on_conveyor`` – randomises each object's pose and gives
   it an initial velocity matching the belt so there is no contact impulse
   at spawn.
 
-Objects are then transported by **physics friction** with the high-mass
-belt, not by having their velocities overwritten directly.
+Objects are transported by **physics friction** with the belt.
+
+Note: ``PhysxSurfaceVelocityAPI`` was tested and rejected — it breaks
+collision entirely in Isaac Lab headless/Gym mode (upstream issue #4561,
+present in Isaac Sim 5.1 and 6.0).
 """
 
 from __future__ import annotations
@@ -92,7 +96,12 @@ def _randomise_belt_velocity(
 
 
 # ---------------------------------------------------------------------------
-# Belt events (mirrors Isaac Sim Conveyor Belt Utility)
+# Belt events (PhysxSurfaceVelocityAPI approach)
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Belt events
 # ---------------------------------------------------------------------------
 
 
@@ -103,11 +112,7 @@ def reset_conveyor_belt(
     speed_range: tuple[float, float],
     velocity_noise: float,
 ) -> None:
-    """Reset the conveyor belt to its default pose with per-env randomised velocity.
-
-    Called on episode reset to restore the belt position (preventing any
-    accumulated drift) and to sample a new speed + direction per env.
-    """
+    """Reset the conveyor belt to its default pose with per-env randomised velocity."""
     belt: RigidObject = env.scene[belt_cfg.name]
 
     state = wp.to_torch(belt.data.default_root_state)[env_ids].clone()
@@ -126,21 +131,19 @@ def drive_conveyor_belt(
     env_ids: torch.Tensor,
     belt_cfg: SceneEntityCfg,
 ) -> None:
-    """Maintain the belt's per-env target velocity **and** reset its pose (interval).
+    """Maintain belt velocity and reset pose each interval tick.
 
-    Reads the velocity stored by ``reset_conveyor_belt`` in
-    ``env._conveyor_vel_per_env`` so each environment keeps its own speed
-    and direction throughout the episode.
+    Kinematic bodies don't drift from friction but do translate from the
+    imposed velocity, so the pose reset keeps the belt in place while the
+    velocity keeps driving contact friction on objects above it.
     """
     belt: RigidObject = env.scene[belt_cfg.name]
     buf = _get_or_init_conveyor_vel(env)
 
-    # --- reset pose to prevent translational drift ---
     state = wp.to_torch(belt.data.default_root_state)[env_ids].clone()
     state[:, :3] += env.scene.env_origins[env_ids]
     belt.write_root_pose_to_sim(state[:, :7], env_ids)
 
-    # --- re-apply per-env conveyor velocity ---
     vel = torch.zeros(len(env_ids), 6, device=env.device)
     vel[:, :3] = buf[env_ids]
     belt.write_root_velocity_to_sim(vel, env_ids=env_ids)
