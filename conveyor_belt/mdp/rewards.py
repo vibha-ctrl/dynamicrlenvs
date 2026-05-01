@@ -244,7 +244,66 @@ def gripper_reopen_penalty(env: ManagerBasedRLEnv) -> torch.Tensor:
     return penalty.float()
 
 
-# ── 8. top-down orientation reward ───────────────────────────────────────
+# ── 8. lateral (XY) alignment reward ────────────────────────────────────
+
+def lateral_alignment(
+    env: ManagerBasedRLEnv,
+    std: float = 0.05,
+    ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
+    object_names: list[str] = ["object_0", "object_1", "object_2"],
+) -> torch.Tensor:
+    """Reward for EE being directly above the target object in XY.
+
+    ``approach_object`` uses 3-D distance, so hovering beside the object at
+    can-height scores higher than being 15 cm directly above it.  This term
+    fills that gap: it rewards zero lateral offset (std ≈ 5 cm), gated on the
+    EE being above the object's z so it only fires during a top-down approach.
+    """
+    ee_frame: FrameTransformer = env.scene[ee_frame_cfg.name]
+    ee_pos_w = wp.to_torch(ee_frame.data.target_pos_w)[..., 0, :]
+    obj_pos_w = _target_obj_state(env, object_names)
+
+    xy_dist = torch.norm(ee_pos_w[:, :2] - obj_pos_w[:, :2], dim=-1)
+    above = (ee_pos_w[:, 2] > obj_pos_w[:, 2]).float()
+    return (1.0 - torch.tanh(xy_dist / std)) * above
+
+
+# ── 9. object upright penalty ─────────────────────────────────────────────
+
+def object_upright(
+    env: ManagerBasedRLEnv,
+    upright_quat: tuple[float, float, float, float] = (-0.7071, 0.0, 0.0, 0.7071),
+    object_names: list[str] = ["object_0", "object_1", "object_2"],
+) -> torch.Tensor:
+    """Penalise the target object tipping from its upright spawn orientation.
+
+    Uses quaternion dot-product similarity: returns 0 when perfectly upright,
+    approaching -1 when the object has tipped ~90°.  Use a negative weight.
+    Gated on the object being near belt level (z < 0.15 m local) so the
+    penalty doesn't fire while the object is intentionally being rotated
+    during a grasp/lift.
+    """
+    idx = env._target_object_idx
+    all_quats = torch.stack(
+        [wp.to_torch(env.scene[name].data.root_quat_w)[:, :4] for name in object_names],
+        dim=1,
+    )  # (N, num_objects, 4) xyzw
+    obj_quat = all_quats[torch.arange(env.num_envs, device=env.device), idx]
+
+    all_pos = torch.stack(
+        [wp.to_torch(env.scene[name].data.root_pos_w)[:, :3] for name in object_names],
+        dim=1,
+    )
+    obj_pos_w = all_pos[torch.arange(env.num_envs, device=env.device), idx]
+    local_z = obj_pos_w[:, 2] - env.scene.env_origins[:, 2]
+    on_belt = (local_z < 0.15).float()
+
+    target = torch.tensor(upright_quat, device=env.device, dtype=torch.float32)
+    similarity = torch.abs((obj_quat * target).sum(dim=-1))  # 1 = upright, 0 = 90° off
+    return (similarity - 1.0) * on_belt  # 0 when upright, negative when tipped
+
+
+# ── 10. top-down orientation reward ──────────────────────────────────────
 
 def gripper_downward(
     env: ManagerBasedRLEnv,

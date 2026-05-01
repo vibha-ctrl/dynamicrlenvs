@@ -184,24 +184,36 @@ class EventCfg:
 class RewardsCfg:
     """Progress-based rewards: pay for *improving*, not for *being*.
 
-    - approach: dense, turns off after grasp
-    - grasp_event: one-time bonus on first grasp
+    - approach: dense 3-D proximity toward target object
+    - lateral_alignment: XY centering above target (arm-behind-can fix)
+    - gripper_downward: top-down approach orientation
+    - grasp_event: one-time bonus on first confirmed grasp (off-belt)
     - lift_progress: delta-height reward (zero for hovering)
-    - milestones: one-time bonuses at 8/12/16 cm
-    - success_reward: large terminal bonus (gated on controlled grasp)
+    - height_milestones: one-time bonuses at 8 / 12 / 16 cm
+    - success_reward: large dense bonus when object above 20 cm
+    - object_upright: penalty for knocking the target object over
     - time_cost: small per-step penalty to encourage finishing fast
     """
 
     approach_object = RewTerm(
         func=mdp.approach_object,
-        params={"std": 0.2, "object_names": OBJECT_NAMES},
+        params={"std": 0.1, "object_names": OBJECT_NAMES},
         weight=2.0,
+    )
+
+    # Reward EE being directly above the target in XY (not beside it).
+    # Addresses the "arm behind the can" failure mode where 3-D approach
+    # reward is maximised by hovering beside the object at can height.
+    lateral_alignment = RewTerm(
+        func=mdp.lateral_alignment,
+        params={"std": 0.05, "object_names": OBJECT_NAMES},
+        weight=3.0,
     )
 
     grasp_event = RewTerm(
         func=mdp.grasp_event,
         params={
-            "minimal_height": 0.08,
+            "minimal_height": 0.12,   # must be clearly off the belt (~0.06 m surface)
             "max_grasp_distance": 0.08,
             "object_names": OBJECT_NAMES,
         },
@@ -214,6 +226,12 @@ class RewardsCfg:
         weight=300.0,
     )
 
+    height_milestones = RewTerm(
+        func=mdp.height_milestones,
+        params={"object_names": OBJECT_NAMES},
+        weight=1.0,
+    )
+
     success_reward = RewTerm(
         func=mdp.success_bonus,
         params={
@@ -222,6 +240,14 @@ class RewardsCfg:
             "object_names": OBJECT_NAMES,
         },
         weight=500.0,
+    )
+
+    # Penalise tipping the target object while it is on the belt.
+    # Gated on object z < 15 cm so it doesn't fire during intentional lift.
+    object_upright = RewTerm(
+        func=mdp.object_upright,
+        params={"object_names": OBJECT_NAMES},
+        weight=-5.0,
     )
 
     time_cost = RewTerm(func=mdp.alive_cost, weight=-0.01)
@@ -234,16 +260,14 @@ class RewardsCfg:
         params={"asset_cfg": SceneEntityCfg("robot")},
     )
 
-    # Top-down orientation reward: encourage the gripper z-axis to point
-    # downward when approaching the target. This is the main fix for upright
-    # YCB objects (bottle / can) getting knocked over by sideways approach.
+    # Top-down orientation: encourage gripper Z-axis pointing downward.
+    # Increased weight so top-down approach dominates over side approaches.
     gripper_downward = RewTerm(
         func=mdp.gripper_downward,
         params={"max_distance": 0.20, "object_names": OBJECT_NAMES},
-        weight=1.0,
+        weight=2.5,
     )
 
-    # Gripper shaping -------------------------------------------------------
     # Encourage closing the gripper when near the target object. Gated on
     # proximity (<10 cm) so the agent cannot hack it by closing immediately.
     gripper_close = RewTerm(
@@ -256,8 +280,7 @@ class RewardsCfg:
     )
 
     # Heavy penalty for *reopening* the gripper after it has been closed
-    # at any point in the episode. Applied every step the gripper is open
-    # post-close, so it strongly dominates any temptation to re-grasp.
+    # at any point in the episode.
     gripper_reopen = RewTerm(
         func=mdp.gripper_reopen_penalty,
         weight=-2.0,
