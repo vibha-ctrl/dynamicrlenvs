@@ -290,7 +290,7 @@ class RewardsCfg:
             "max_distance": 0.05,
             "object_names": OBJECT_NAMES,
         },
-        weight=3.0,
+        weight=10.0,
     )
 
     # Continuous reward every step gripper stays closed while near object.
@@ -298,7 +298,9 @@ class RewardsCfg:
     gripper_hold = RewTerm(
         func=mdp.gripper_hold_closed,
         params={
-            "max_distance": 0.10,
+            "xy_threshold": 0.03,
+            "z_min": 0.0,
+            "z_max": 0.05,
             "object_names": OBJECT_NAMES,
         },
         weight=2.0,

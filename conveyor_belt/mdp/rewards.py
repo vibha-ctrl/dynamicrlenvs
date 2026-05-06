@@ -252,23 +252,28 @@ def gripper_close_near_target(
 
 def gripper_hold_closed(
     env: ManagerBasedRLEnv,
-    max_distance: float = 0.10,
+    xy_threshold: float = 0.03,
+    z_min: float = 0.0,
+    z_max: float = 0.05,
     ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
     object_names: list[str] = ["object_0", "object_1", "object_2"],
 ) -> torch.Tensor:
-    """Continuous reward every step the gripper is closed while near the object.
+    """Continuous reward every step the gripper is closed with the object inside it.
 
-    Unlike gripper_close_near_target (rising-edge only), this fires every step
-    so the policy's mean action is pushed toward 'close' when in position.
+    'Inside' means: object is directly below the ee_frame (xy < 3cm) AND
+    fingertips are at object-center level (z_gap in [0, 5cm]).
+    This prevents rewarding closing when the object is off to the side.
     """
     ee_frame: FrameTransformer = env.scene[ee_frame_cfg.name]
     ee_pos_w = wp.to_torch(ee_frame.data.target_pos_w)[..., 0, :]
     obj_pos_w = _target_obj_state(env, object_names)
 
-    dist = torch.norm(obj_pos_w - ee_pos_w, dim=-1)
-    near = dist < max_distance
+    xy_dist = torch.norm(ee_pos_w[:, :2] - obj_pos_w[:, :2], dim=-1)
+    z_gap = ee_pos_w[:, 2] - obj_pos_w[:, 2]
+
+    object_inside = (xy_dist < xy_threshold) & (z_gap >= z_min) & (z_gap < z_max)
     closed = _gripper_close_cmd(env)
-    return (closed & near).float()
+    return (closed & object_inside).float()
 
 
 def gripper_reopen_penalty(env: ManagerBasedRLEnv) -> torch.Tensor:
@@ -429,6 +434,9 @@ def descend_to_object(
     xy_dist = torch.norm(ee_pos_w[:, :2] - obj_pos_w[:, :2], dim=-1)
     xy_aligned = (xy_dist < xy_threshold).float()
 
-    # positive when EE is above the object, clamped to zero if EE is below
-    z_gap = torch.clamp(ee_pos_w[:, 2] - obj_pos_w[:, 2], min=0.0)
-    return (1.0 - torch.tanh(z_gap / z_std)) * xy_aligned
+    # Peak reward at 2cm above object center; falls off in both directions.
+    # Prevents arm from ramming below object center (was clamped before = no penalty).
+    target_gap = 0.02
+    z_gap = ee_pos_w[:, 2] - obj_pos_w[:, 2]
+    z_error = torch.abs(z_gap - target_gap)
+    return torch.exp(-z_error / z_std) * xy_aligned
