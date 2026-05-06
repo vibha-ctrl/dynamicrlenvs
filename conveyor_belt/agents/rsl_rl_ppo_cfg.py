@@ -26,7 +26,10 @@ class ConveyorBeltPPORunnerCfg(RslRlOnPolicyRunnerCfg):
         hidden_dims=[256, 128, 64],
         activation="elu",
         obs_normalization=False,
-        distribution_cfg=RslRlMLPModelCfg.GaussianDistributionCfg(init_std=0.3, std_type="log"),
+        distribution_cfg=RslRlMLPModelCfg.GaussianDistributionCfg(
+            init_std=0.5,
+            std_type="log",
+        ),
     )
 
     critic = RslRlMLPModelCfg(

@@ -56,9 +56,13 @@ def _target_grasped_height(
     env: ManagerBasedRLEnv,
     ee_frame_cfg: SceneEntityCfg,
     object_names: list[str],
-    max_dist: float = 0.15,
+    max_dist: float = 0.05,
 ) -> torch.Tensor:
-    """Height of the target object if it is within *max_dist* of the gripper, else 0."""
+    """Height of the target object if it is within *max_dist* of the gripper, else 0.
+
+    ee_frame includes a 10.34 cm forward offset so it sits at fingertip level.
+    Object centre is within ~3–5 cm of fingertips when actually grasped.
+    """
     ee_frame: FrameTransformer = env.scene[ee_frame_cfg.name]
     ee_pos_w = wp.to_torch(ee_frame.data.target_pos_w)[..., 0, :]
     obj_pos_w = _target_obj_state(env, object_names)
@@ -90,27 +94,41 @@ def approach_object(
 
 def grasp_event(
     env: ManagerBasedRLEnv,
-    minimal_height: float,
     max_grasp_distance: float,
     ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
     object_names: list[str] = ["object_0", "object_1", "object_2"],
 ) -> torch.Tensor:
-    """One-time bonus when the robot first grasps and lifts the target object."""
+    """One-time bonus when the gripper closes ON the target object.
+
+    Requires the gripper to **transition** from open to closed (rising edge)
+    while the object is within ``max_grasp_distance`` of the EE fingertips.
+    Pre-closing the gripper before reaching the object does not trigger this —
+    the close command must happen when the object is already in range.
+    """
     if not hasattr(env, "_grasp_event_given"):
         env._grasp_event_given = torch.zeros(env.num_envs, device=env.device, dtype=torch.bool)
+    if not hasattr(env, "_gripper_was_closed"):
+        env._gripper_was_closed = torch.zeros(env.num_envs, device=env.device, dtype=torch.bool)
 
-    env._grasp_event_given[_detect_resets(env, "grasp")] = False
+    just_reset = _detect_resets(env, "grasp")
+    env._grasp_event_given[just_reset] = False
+    env._gripper_was_closed[just_reset] = False
 
     ee_frame: FrameTransformer = env.scene[ee_frame_cfg.name]
     ee_pos_w = wp.to_torch(ee_frame.data.target_pos_w)[..., 0, :]
     obj_pos_w = _target_obj_state(env, object_names)
 
     dist = torch.norm(obj_pos_w - ee_pos_w, dim=-1)
-    local_z = obj_pos_w[:, 2] - env.scene.env_origins[:, 2]
-    currently_grasped = (dist < max_grasp_distance) & (local_z > minimal_height)
+    near = dist < max_grasp_distance
 
-    new_grasp = currently_grasped & ~env._grasp_event_given
-    env._grasp_event_given |= currently_grasped
+    gripper_closed = _gripper_close_cmd(env)
+    # rising edge: closed this step but was open last step
+    just_closed = gripper_closed & ~env._gripper_was_closed
+    env._gripper_was_closed[:] = gripper_closed
+
+    # bonus fires once per episode on the first close-while-near event
+    new_grasp = just_closed & near & ~env._grasp_event_given
+    env._grasp_event_given |= new_grasp
     return new_grasp.float()
 
 
@@ -207,10 +225,41 @@ def gripper_close_near_target(
     ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
     object_names: list[str] = ["object_0", "object_1", "object_2"],
 ) -> torch.Tensor:
-    """Reward per step when the gripper is commanded closed *and* EE is near target.
+    """Reward per step when the gripper closes on the target object.
 
-    Gated on proximity so the agent can't hack the reward by simply closing
-    the gripper immediately on reset.
+    Requires the gripper to have been OPEN the previous step — fires on the
+    transition from open→closed while near the object.  A pre-closed gripper
+    travelling toward the object scores nothing here.
+    """
+    if not hasattr(env, "_gc_gripper_was_closed"):
+        env._gc_gripper_was_closed = torch.zeros(env.num_envs, device=env.device, dtype=torch.bool)
+
+    just_reset = _detect_resets(env, "gc_near")
+    env._gc_gripper_was_closed[just_reset] = False
+
+    ee_frame: FrameTransformer = env.scene[ee_frame_cfg.name]
+    ee_pos_w = wp.to_torch(ee_frame.data.target_pos_w)[..., 0, :]
+    obj_pos_w = _target_obj_state(env, object_names)
+
+    dist = torch.norm(obj_pos_w - ee_pos_w, dim=-1)
+    near = dist < max_distance
+    closed = _gripper_close_cmd(env)
+
+    just_closed = closed & ~env._gc_gripper_was_closed
+    env._gc_gripper_was_closed[:] = closed
+    return (just_closed & near).float()
+
+
+def gripper_hold_closed(
+    env: ManagerBasedRLEnv,
+    max_distance: float = 0.10,
+    ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
+    object_names: list[str] = ["object_0", "object_1", "object_2"],
+) -> torch.Tensor:
+    """Continuous reward every step the gripper is closed while near the object.
+
+    Unlike gripper_close_near_target (rising-edge only), this fires every step
+    so the policy's mean action is pushed toward 'close' when in position.
     """
     ee_frame: FrameTransformer = env.scene[ee_frame_cfg.name]
     ee_pos_w = wp.to_torch(ee_frame.data.target_pos_w)[..., 0, :]
@@ -248,7 +297,7 @@ def gripper_reopen_penalty(env: ManagerBasedRLEnv) -> torch.Tensor:
 
 def lateral_alignment(
     env: ManagerBasedRLEnv,
-    std: float = 0.05,
+    std: float = 0.03,
     ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
     object_names: list[str] = ["object_0", "object_1", "object_2"],
 ) -> torch.Tensor:
@@ -256,7 +305,7 @@ def lateral_alignment(
 
     ``approach_object`` uses 3-D distance, so hovering beside the object at
     can-height scores higher than being 15 cm directly above it.  This term
-    fills that gap: it rewards zero lateral offset (std ≈ 5 cm), gated on the
+    fills that gap: it rewards zero lateral offset (std ≈ 3 cm), gated on the
     EE being above the object's z so it only fires during a top-down approach.
     """
     ee_frame: FrameTransformer = env.scene[ee_frame_cfg.name]
@@ -336,3 +385,50 @@ def gripper_downward(
     near = (dist < max_distance).float()
 
     return score * near
+
+
+# ── 11. dwell near object ────────────────────────────────────────────────
+
+def dwell_near_object(
+    env: ManagerBasedRLEnv,
+    max_distance: float = 0.12,
+    ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
+    object_names: list[str] = ["object_0", "object_1", "object_2"],
+) -> torch.Tensor:
+    """Reward +1 every step the EE stays within ``max_distance`` of the target.
+
+    Forces the arm to actively track the object as it moves on the belt
+    rather than approaching once and drifting away.
+    """
+    ee_frame: FrameTransformer = env.scene[ee_frame_cfg.name]
+    ee_pos_w = wp.to_torch(ee_frame.data.target_pos_w)[..., 0, :]
+    obj_pos_w = _target_obj_state(env, object_names)
+    dist = torch.norm(obj_pos_w - ee_pos_w, dim=-1)
+    return (dist < max_distance).float()
+
+
+# ── 12. vertical descent reward ───────────────────────────────────────────
+
+def descend_to_object(
+    env: ManagerBasedRLEnv,
+    xy_threshold: float = 0.04,
+    z_std: float = 0.03,
+    ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
+    object_names: list[str] = ["object_0", "object_1", "object_2"],
+) -> torch.Tensor:
+    """Reward closing the vertical gap once the EE is XY-aligned over the target.
+
+    Fires only when the EE is within ``xy_threshold`` laterally, pushing the
+    arm to descend rather than hover.  Uses a tanh kernel on the vertical gap
+    (EE_z - obj_z) so the gradient is strongest in the final few centimetres.
+    """
+    ee_frame: FrameTransformer = env.scene[ee_frame_cfg.name]
+    ee_pos_w = wp.to_torch(ee_frame.data.target_pos_w)[..., 0, :]
+    obj_pos_w = _target_obj_state(env, object_names)
+
+    xy_dist = torch.norm(ee_pos_w[:, :2] - obj_pos_w[:, :2], dim=-1)
+    xy_aligned = (xy_dist < xy_threshold).float()
+
+    # positive when EE is above the object, clamped to zero if EE is below
+    z_gap = torch.clamp(ee_pos_w[:, 2] - obj_pos_w[:, 2], min=0.0)
+    return (1.0 - torch.tanh(z_gap / z_std)) * xy_aligned

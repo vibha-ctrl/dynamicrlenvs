@@ -195,26 +195,41 @@ class RewardsCfg:
     - time_cost: small per-step penalty to encourage finishing fast
     """
 
+    # Coarse 3-D approach: pulls the arm into the vicinity of the object.
     approach_object = RewTerm(
         func=mdp.approach_object,
-        params={"std": 0.1, "object_names": OBJECT_NAMES},
+        params={"std": 0.05, "object_names": OBJECT_NAMES},
         weight=2.0,
     )
 
-    # Reward EE being directly above the target in XY (not beside it).
-    # Addresses the "arm behind the can" failure mode where 3-D approach
-    # reward is maximised by hovering beside the object at can height.
+    # Fine 3-D approach: sharp gradient in the last ~6 cm (panda_hand to
+    # object-centre when the object is seated in the jaws is ~6–8 cm).
+    approach_close = RewTerm(
+        func=mdp.approach_object,
+        params={"std": 0.06, "object_names": OBJECT_NAMES},
+        weight=6.0,
+    )
+
+    # XY centering above target: std 3 cm so only near-perfect alignment scores.
     lateral_alignment = RewTerm(
         func=mdp.lateral_alignment,
-        params={"std": 0.05, "object_names": OBJECT_NAMES},
+        params={"std": 0.03, "object_names": OBJECT_NAMES},
         weight=3.0,
+    )
+
+    # Descend once XY-aligned: pushes the arm to close the vertical gap.
+    # xy_threshold 4 cm, z_std 6 cm — at grasp depth the hand sits ~6 cm
+    # above the object centre so the peak reward is at that gap, not zero.
+    descend_to_object = RewTerm(
+        func=mdp.descend_to_object,
+        params={"xy_threshold": 0.04, "z_std": 0.06, "object_names": OBJECT_NAMES},
+        weight=5.0,
     )
 
     grasp_event = RewTerm(
         func=mdp.grasp_event,
         params={
-            "minimal_height": 0.12,   # must be clearly off the belt (~0.06 m surface)
-            "max_grasp_distance": 0.08,
+            "max_grasp_distance": 0.05,  # ee_frame is at fingertip level; object within 5 cm = in jaws
             "object_names": OBJECT_NAMES,
         },
         weight=50.0,
@@ -236,7 +251,7 @@ class RewardsCfg:
         func=mdp.success_bonus,
         params={
             "target_height": 0.20,
-            "max_grasp_distance": 0.12,
+            "max_grasp_distance": 0.12,  # hand above object centre by ~6–10 cm when lifted
             "object_names": OBJECT_NAMES,
         },
         weight=500.0,
@@ -247,7 +262,7 @@ class RewardsCfg:
     object_upright = RewTerm(
         func=mdp.object_upright,
         params={"object_names": OBJECT_NAMES},
-        weight=-5.0,
+        weight=-15.0,
     )
 
     time_cost = RewTerm(func=mdp.alive_cost, weight=-0.01)
@@ -260,31 +275,37 @@ class RewardsCfg:
         params={"asset_cfg": SceneEntityCfg("robot")},
     )
 
-    # Top-down orientation: encourage gripper Z-axis pointing downward.
-    # Increased weight so top-down approach dominates over side approaches.
+    # Top-down orientation: gated on 12 cm so it only fires when the arm
+    # is already close enough to matter.
     gripper_downward = RewTerm(
         func=mdp.gripper_downward,
-        params={"max_distance": 0.20, "object_names": OBJECT_NAMES},
+        params={"max_distance": 0.12, "object_names": OBJECT_NAMES},
         weight=2.5,
     )
 
-    # Encourage closing the gripper when near the target object. Gated on
-    # proximity (<10 cm) so the agent cannot hack it by closing immediately.
+    # Gripper close reward: fires on open→closed transition within 5 cm of fingertips.
     gripper_close = RewTerm(
         func=mdp.gripper_close_near_target,
+        params={
+            "max_distance": 0.05,
+            "object_names": OBJECT_NAMES,
+        },
+        weight=3.0,
+    )
+
+    # Continuous reward every step gripper stays closed while near object.
+    # This shapes the mean policy action toward "close" so it works in deterministic play.
+    gripper_hold = RewTerm(
+        func=mdp.gripper_hold_closed,
         params={
             "max_distance": 0.10,
             "object_names": OBJECT_NAMES,
         },
-        weight=0.5,
+        weight=2.0,
     )
 
-    # Heavy penalty for *reopening* the gripper after it has been closed
-    # at any point in the episode.
-    gripper_reopen = RewTerm(
-        func=mdp.gripper_reopen_penalty,
-        weight=-2.0,
-    )
+    # gripper_reopen removed — it was preventing the policy from ever closing
+    # the gripper because random actions made the penalty too risky to risk.
 
 
 # ---------------------------------------------------------------------------
