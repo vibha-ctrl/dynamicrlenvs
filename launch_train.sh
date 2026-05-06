@@ -3,13 +3,13 @@
 set -u
 
 NUM_ENVS="${1:-4096}"
-MAX_ITERATIONS="${2:-15000}"
+MAX_ITERATIONS="${2:-1500}"
 RUN_TAG="${3:-$(date +%Y%m%d_%H%M%S)}"
 
-ISAAC_ROOT="/home/apple/IsaacLab"
-ENV_ROOT="/home/apple/conveyor_belt"
+ISAAC_ROOT="/media/db4/wangyx/vibha/IsaacLab"
+ENV_ROOT="/media/db4/wangyx/vibha/dynamicrlenvs"
 TRAIN_SCRIPT="${ENV_ROOT}/conveyor_belt/train.py"
-VENV_ACTIVATE="${ISAAC_ROOT}/vibhaenv/bin/activate"
+VENV_ACTIVATE="/media/db4/wangyx/vibha/venv/bin/activate"
 
 OUT_LOG="${ENV_ROOT}/train_output_${RUN_TAG}.log"
 META_LOG="${ENV_ROOT}/train_meta_${RUN_TAG}.log"

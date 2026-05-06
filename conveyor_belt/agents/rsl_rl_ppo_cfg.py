@@ -15,7 +15,7 @@ class ConveyorBeltPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     seed: int = 42
     num_steps_per_env: int = 48
     max_iterations: int = 5000
-    save_interval: int = 100
+    save_interval: int = 20
     experiment_name: str = "conveyor_belt"
     run_name: str = "ppo"
     logger: str = "tensorboard"

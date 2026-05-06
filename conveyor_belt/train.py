@@ -112,7 +112,7 @@ def main() -> None:
     agent_cfg.max_iterations = args_cli.max_iterations
     agent_cfg.seed = args_cli.seed
 
-    log_root = os.path.join("logs", "conveyor_belt")
+    log_root = os.path.join("logs", "latest_runs")
     log_dir = os.path.join(log_root, datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
     os.makedirs(log_dir, exist_ok=True)
     print(f"[INFO] Logging experiment to: {log_dir}")
