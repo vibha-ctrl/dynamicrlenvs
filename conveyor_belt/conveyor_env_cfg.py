@@ -91,6 +91,10 @@ class ObservationsCfg:
             params={"object_names": OBJECT_NAMES},
         )
         last_actions = ObsTerm(func=mdp.last_action)
+        target_object = ObsTerm(
+            func=mdp.target_object_one_hot,
+            params={"object_names": OBJECT_NAMES},
+        )
 
         def __post_init__(self) -> None:
             self.enable_corruption = True
@@ -129,6 +133,13 @@ def _object_reset_term(asset_name: str) -> EventTerm:
 @configclass
 class EventCfg:
     """Randomisation events and conveyor-belt driving."""
+
+    # -- target object randomization (must run before object resets) ----------
+    randomize_target = EventTerm(
+        func=mdp.randomize_target_object,
+        mode="reset",
+        params={"num_objects": len(OBJECT_NAMES)},
+    )
 
     # -- scene / belt reset ---------------------------------------------------
     reset_scene = EventTerm(func=mdp.reset_scene_to_default, mode="reset")
@@ -175,23 +186,23 @@ class RewardsCfg:
     approach_object = RewTerm(
         func=mdp.approach_object,
         params={"std": 0.1, "object_names": OBJECT_NAMES},
-        weight=2.0,
+        weight=0.2,
     )
 
     grasp_event = RewTerm(
         func=mdp.grasp_event,
         params={
-            "minimal_height": 0.08,
+            "minimal_height": 0.035,
             "max_grasp_distance": 0.08,
             "object_names": OBJECT_NAMES,
         },
-        weight=5.0,
+        weight=200.0,
     )
 
     lift_progress = RewTerm(
         func=mdp.lift_progress,
         params={"object_names": OBJECT_NAMES},
-        weight=100.0,
+        weight=500.0,
     )
 
     success_reward = RewTerm(

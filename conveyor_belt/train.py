@@ -31,6 +31,7 @@ if args_cli.video:
 app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
 
+import sys
 import time  # noqa: E402
 from datetime import datetime  # noqa: E402
 
@@ -112,10 +113,26 @@ def main() -> None:
     agent_cfg.max_iterations = args_cli.max_iterations
     agent_cfg.seed = args_cli.seed
 
-    log_root = os.path.join("logs", "conveyor_belt")
+    log_root = os.path.join("/media/db4/wangyx/vibha/debug/runs", "conveyor_belt")
     log_dir = os.path.join(log_root, datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
     os.makedirs(log_dir, exist_ok=True)
     print(f"[INFO] Logging experiment to: {log_dir}")
+
+    # Tee stdout+stderr to a log file so all terminal output is saved
+    log_file = open(os.path.join(log_dir, "train.log"), "w", buffering=1)
+
+    class _Tee:
+        def __init__(self, *streams):
+            self._streams = streams
+        def write(self, data):
+            for s in self._streams:
+                s.write(data)
+        def flush(self):
+            for s in self._streams:
+                s.flush()
+
+    sys.stdout = _Tee(sys.__stdout__, log_file)
+    sys.stderr = _Tee(sys.__stderr__, log_file)
 
     env = gym.make(
         "Isaac-ConveyorBelt-Franka-v0",

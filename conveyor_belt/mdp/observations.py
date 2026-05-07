@@ -52,6 +52,22 @@ def object_linear_velocities(
     return torch.cat(parts, dim=-1)
 
 
+def target_object_one_hot(
+    env: ManagerBasedRLEnv,
+    object_names: list[str] = ["object_0", "object_1", "object_2"],
+) -> torch.Tensor:
+    """One-hot encoding of the per-env target object index.
+
+    Returns shape ``(num_envs, len(object_names))``.
+    """
+    if not hasattr(env, "_target_object_idx"):
+        env._target_object_idx = torch.zeros(env.num_envs, device=env.device, dtype=torch.long)
+    n = len(object_names)
+    one_hot = torch.zeros(env.num_envs, n, device=env.device)
+    one_hot.scatter_(1, env._target_object_idx.unsqueeze(1), 1.0)
+    return one_hot
+
+
 def ee_to_object_vectors(
     env: ManagerBasedRLEnv,
     ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),

@@ -130,6 +130,21 @@ def drive_conveyor_belt(
 # ---------------------------------------------------------------------------
 
 
+def randomize_target_object(
+    env: ManagerBasedRLEnv,
+    env_ids: torch.Tensor,
+    num_objects: int = 3,
+) -> None:
+    """Randomly assign a target object index for each resetting env.
+
+    Stores ``env._target_object_idx`` (shape: ``num_envs``, dtype long) where
+    value 0/1/2 corresponds to object_0/object_1/object_2.
+    """
+    if not hasattr(env, "_target_object_idx"):
+        env._target_object_idx = torch.zeros(env.num_envs, device=env.device, dtype=torch.long)
+    env._target_object_idx[env_ids] = torch.randint(0, num_objects, (len(env_ids),), device=env.device)
+
+
 def reset_object_on_conveyor(
     env: ManagerBasedRLEnv,
     env_ids: torch.Tensor,

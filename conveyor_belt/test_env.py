@@ -33,6 +33,7 @@ from isaaclab.app import AppLauncher  # noqa: E402
 parser = argparse.ArgumentParser(description="Smoke-test the conveyor-belt env.")
 parser.add_argument("--num_envs", type=int, default=4, help="Parallel environments.")
 parser.add_argument("--steps", type=int, default=200, help="Env steps to run.")
+parser.add_argument("--viser_port", type=int, default=8080, help="Port for the viser web server.")
 parser.add_argument("--disable_fabric", action="store_true", default=False, help="Disable fabric and use USD I/O operations.")
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
@@ -55,6 +56,9 @@ def main() -> None:
     env_cfg = ConveyorBeltEnvCfg()
     env_cfg.scene.num_envs = args_cli.num_envs
     env_cfg.seed = 42
+
+    if "viser" in (args_cli.visualizer or ""):
+        print(f"\n  Viser visualizer enabled — open http://localhost:8080 in your browser.\n")
 
     # ---- create ----
     print(f"\n{'='*60}")
