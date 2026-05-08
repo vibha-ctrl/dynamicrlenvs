@@ -52,6 +52,15 @@ def object_linear_velocities(
     return torch.cat(parts, dim=-1)
 
 
+def belt_velocity(
+    env: ManagerBasedRLEnv,
+) -> torch.Tensor:
+    """Per-env belt velocity (Y component only). Shape: ``(num_envs, 1)``."""
+    if not hasattr(env, "_belt_velocity"):
+        return torch.zeros(env.num_envs, 1, device=env.device)
+    return env._belt_velocity[:, 1:2]
+
+
 def target_object_one_hot(
     env: ManagerBasedRLEnv,
     object_names: list[str] = ["object_0", "object_1", "object_2"],

@@ -64,21 +64,42 @@ def reset_conveyor_belt(
     belt_cfg: SceneEntityCfg,
     conveyor_velocity: tuple[float, float, float],
     velocity_noise: float,
+    speed_range: tuple[float, float] | None = None,
+    randomize_direction: bool = False,
 ) -> None:
     """Reset the conveyor belt to its default pose with randomised velocity.
 
-    Called on episode reset to restore the belt position (preventing any
-    accumulated drift) and to apply the conveyor speed ± small noise.
+    If ``speed_range`` is provided, each env gets a random speed in that range
+    instead of the fixed ``conveyor_velocity`` magnitude.  If
+    ``randomize_direction`` is True, each env independently gets +Y or -Y.
+
+    The chosen per-env velocity is stored in ``env._belt_velocity``
+    (shape: ``num_envs × 3``) so ``drive_conveyor_belt`` can reuse it.
     """
     belt: RigidObject = env.scene[belt_cfg.name]
     n = len(env_ids)
 
+    if not hasattr(env, "_belt_velocity"):
+        env._belt_velocity = torch.zeros(env.num_envs, 3, device=env.device)
+
+    if speed_range is not None:
+        lo, hi = speed_range
+        speeds = torch.empty(n, device=env.device).uniform_(lo, hi)
+    else:
+        speeds = torch.full((n,), abs(conveyor_velocity[1]), device=env.device)
+
+    if randomize_direction:
+        # independently +1 or -1 per env
+        signs = torch.sign(torch.rand(n, device=env.device) - 0.5)
+    else:
+        signs = torch.full((n,), -1.0 if conveyor_velocity[1] < 0 else 1.0, device=env.device)
+
+    lin_vel = torch.zeros(n, 3, device=env.device)
+    lin_vel[:, 1] = signs * speeds  # Y-axis
+    env._belt_velocity[env_ids] = lin_vel
+
     state = wp.to_torch(belt.data.default_root_state)[env_ids].clone()
     state[:, :3] += env.scene.env_origins[env_ids]
-
-    lin_vel = _conveyor_velocity_tensor(
-        conveyor_velocity, velocity_noise, n, env.device
-    )
     state[:, 7:10] = lin_vel
     state[:, 10:13] = 0.0
 
@@ -92,22 +113,13 @@ def drive_conveyor_belt(
     belt_cfg: SceneEntityCfg,
     conveyor_velocity: tuple[float, float, float],
     velocity_noise: float,
+    speed_range: tuple[float, float] | None = None,
+    randomize_direction: bool = False,
 ) -> None:
-    """Maintain the belt's target velocity **and** reset its pose (interval).
+    """Maintain the belt's per-env velocity and reset its pose (interval).
 
-    Because the belt is a dynamic rigid body, PhysX integrates its velocity
-    into position each step.  At 0.08 m/s and a 0.05 s interval the belt
-    drifts ~4 mm between calls — over a full 8 s episode that compounds to
-    0.64 m, nearly the belt's entire length.
-
-    We therefore **snap the belt back to its default pose** each interval
-    before re-applying velocity.  The ~4 mm correction is well within PhysX
-    depenetration tolerances and does not cause visible jitter for objects
-    resting on the belt.
-
-    This mirrors the Isaac Sim Conveyor Belt Utility, whose OmniGraph node
-    runs every physics tick, keeping the belt effectively stationary while
-    its velocity field drags objects via friction.
+    Uses ``env._belt_velocity`` set by ``reset_conveyor_belt`` so each env
+    keeps its own randomised speed/direction throughout the episode.
     """
     belt: RigidObject = env.scene[belt_cfg.name]
     n = len(env_ids)
@@ -117,11 +129,14 @@ def drive_conveyor_belt(
     state[:, :3] += env.scene.env_origins[env_ids]
     belt.write_root_pose_to_sim(state[:, :7], env_ids)
 
-    # --- re-apply conveyor velocity ---
+    # --- re-apply per-env velocity ---
     vel = torch.zeros(n, 6, device=env.device)
-    vel[:, :3] = _conveyor_velocity_tensor(
-        conveyor_velocity, velocity_noise, n, env.device
-    )
+    if hasattr(env, "_belt_velocity"):
+        vel[:, :3] = env._belt_velocity[env_ids]
+    else:
+        vel[:, :3] = _conveyor_velocity_tensor(
+            conveyor_velocity, velocity_noise, n, env.device
+        )
     belt.write_root_velocity_to_sim(vel, env_ids=env_ids)
 
 

@@ -95,6 +95,7 @@ class ObservationsCfg:
             func=mdp.target_object_one_hot,
             params={"object_names": OBJECT_NAMES},
         )
+        belt_velocity = ObsTerm(func=mdp.belt_velocity)
 
         def __post_init__(self) -> None:
             self.enable_corruption = True
@@ -112,6 +113,8 @@ _BELT_PARAMS = {
     "belt_cfg": SceneEntityCfg("conveyor_belt"),
     "conveyor_velocity": CONVEYOR_SPEED,
     "velocity_noise": CONVEYOR_BELT_NOISE,
+    "speed_range": (0.05, 0.35),
+    "randomize_direction": True,
 }
 
 
