@@ -164,7 +164,7 @@ class EventCfg:
     conveyor_drive = EventTerm(
         func=mdp.drive_conveyor_belt,
         mode="interval",
-        interval_range_s=(0.05, 0.05),
+        interval_range_s=(0.01, 0.01),
         params=_BELT_PARAMS,
     )
 
