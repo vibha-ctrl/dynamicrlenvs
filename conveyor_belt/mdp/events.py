@@ -26,6 +26,7 @@ import torch
 import warp as wp
 
 from isaaclab.managers import SceneEntityCfg
+from isaaclab.utils.math import quat_mul
 
 if TYPE_CHECKING:
     from isaaclab.assets import RigidObject
@@ -187,12 +188,16 @@ def reset_object_on_conveyor(
         root_states[:, i] += torch.empty(n, device=env.device).uniform_(lo, hi)
     root_states[:, :3] += env.scene.env_origins[env_ids]
 
-    # --- random yaw ---
+    # --- random yaw composed with the object's default (upright) orientation ---
+    # The default orientation comes from the spawn ``init_state.rot`` and is
+    # already in root_states[:, 3:7] (cloned from default_root_state).  We apply
+    # a world-frame yaw on top of it so per-object spawn rotations are preserved.
+    default_quat = root_states[:, 3:7].clone()
     yaw = torch.empty(n, device=env.device).uniform_(*yaw_range)
-    root_states[:, 3] = torch.cos(yaw * 0.5)  # qw
-    root_states[:, 4] = 0.0                    # qx
-    root_states[:, 5] = 0.0                    # qy
-    root_states[:, 6] = torch.sin(yaw * 0.5)  # qz
+    yaw_quat = torch.zeros((n, 4), device=env.device)
+    yaw_quat[:, 0] = torch.cos(yaw * 0.5)  # qw
+    yaw_quat[:, 3] = torch.sin(yaw * 0.5)  # qz
+    root_states[:, 3:7] = quat_mul(yaw_quat, default_quat)
 
     # --- match belt velocity (noise on travel axis only) ---
     root_states[:, 7:10] = _conveyor_velocity_tensor(

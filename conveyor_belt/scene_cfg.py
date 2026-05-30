@@ -110,18 +110,54 @@ _ee_marker_cfg.markers["frame"].scale = (0.1, 0.1, 0.1)
 _ee_marker_cfg.prim_path = "/Visuals/FrameTransformer"
 
 
+def _rigid_props() -> sim_utils.RigidBodyPropertiesCfg:
+    return sim_utils.RigidBodyPropertiesCfg(
+        solver_position_iteration_count=64,
+        solver_velocity_iteration_count=8,
+        max_angular_velocity=100.0,
+        max_linear_velocity=10.0,
+        max_depenetration_velocity=1.0,
+        disable_gravity=False,
+    )
+
+
 def _object_spawn_cfg(color: tuple[float, float, float]) -> sim_utils.CuboidCfg:
-    """Return a CuboidCfg for one conveyor object."""
+    """Red object: cube."""
     return sim_utils.CuboidCfg(
         size=OBJECT_SIZE,
-        rigid_props=sim_utils.RigidBodyPropertiesCfg(
-            solver_position_iteration_count=16,
-            solver_velocity_iteration_count=1,
-            max_angular_velocity=100.0,
-            max_linear_velocity=10.0,
-            max_depenetration_velocity=1.0,
-            disable_gravity=False,
+        rigid_props=_rigid_props(),
+        mass_props=sim_utils.MassPropertiesCfg(mass=OBJECT_MASS_KG),
+        collision_props=sim_utils.CollisionPropertiesCfg(),
+        physics_material=sim_utils.RigidBodyMaterialCfg(
+            static_friction=0.5,
+            dynamic_friction=0.3,
         ),
+        visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=color),
+    )
+
+
+def _cylinder_spawn_cfg(color: tuple[float, float, float]) -> sim_utils.CylinderCfg:
+    """Green object: cylinder."""
+    return sim_utils.CylinderCfg(
+        radius=OBJECT_SIZE[0] / 2,
+        height=OBJECT_SIZE[2],
+        rigid_props=_rigid_props(),
+        mass_props=sim_utils.MassPropertiesCfg(mass=OBJECT_MASS_KG),
+        collision_props=sim_utils.CollisionPropertiesCfg(),
+        physics_material=sim_utils.RigidBodyMaterialCfg(
+            static_friction=0.5,
+            dynamic_friction=0.3,
+        ),
+        visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=color),
+    )
+
+
+def _cone_spawn_cfg(color: tuple[float, float, float]) -> sim_utils.ConeCfg:
+    """Blue object: cone."""
+    return sim_utils.ConeCfg(
+        radius=OBJECT_SIZE[0] / 2,
+        height=OBJECT_SIZE[2],
+        rigid_props=_rigid_props(),
         mass_props=sim_utils.MassPropertiesCfg(mass=OBJECT_MASS_KG),
         collision_props=sim_utils.CollisionPropertiesCfg(),
         physics_material=sim_utils.RigidBodyMaterialCfg(
@@ -339,7 +375,7 @@ class ConveyorSceneCfg(InteractiveSceneCfg):
             pos=[0.50, 0.35, OBJECT_SPAWN_Z],
             rot=[1, 0, 0, 0],
         ),
-        spawn=_object_spawn_cfg(color=(0.85, 0.15, 0.15)),
+        spawn=_object_spawn_cfg(color=(0.85, 0.15, 0.15)),  # red cube
     )
 
     object_1: RigidObjectCfg = RigidObjectCfg(
@@ -348,16 +384,16 @@ class ConveyorSceneCfg(InteractiveSceneCfg):
             pos=[0.45, 0.15, OBJECT_SPAWN_Z],
             rot=[1, 0, 0, 0],
         ),
-        spawn=_object_spawn_cfg(color=(0.15, 0.75, 0.15)),
+        spawn=_cylinder_spawn_cfg(color=(0.15, 0.75, 0.15)),  # green cylinder
     )
 
     object_2: RigidObjectCfg = RigidObjectCfg(
         prim_path="{ENV_REGEX_NS}/Object_2",
         init_state=RigidObjectCfg.InitialStateCfg(
             pos=[0.55, -0.05, OBJECT_SPAWN_Z],
-            rot=[1, 0, 0, 0],
+            rot=[0.7071, -0.7071, 0, 0],  # -90° about X (composed with yaw at reset)
         ),
-        spawn=_object_spawn_cfg(color=(0.15, 0.15, 0.85)),
+        spawn=_cone_spawn_cfg(color=(0.15, 0.15, 0.85)),  # blue cone
     )
 
     # -- Ground plane ---------------------------------------------------------
