@@ -118,21 +118,6 @@ _BELT_PARAMS = {
 }
 
 
-def _object_reset_term(asset_name: str) -> EventTerm:
-    """Factory for per-object reset events."""
-    return EventTerm(
-        func=mdp.reset_object_on_conveyor,
-        mode="reset",
-        params={
-            "asset_cfg": SceneEntityCfg(asset_name),
-            "pose_range": {"x": (-0.06, 0.06), "y": (-0.15, 0.15)},
-            "yaw_range": (-0.5, 0.5),
-            "conveyor_velocity": CONVEYOR_SPEED,
-            "velocity_noise": CONVEYOR_OBJECT_NOISE,
-        },
-    )
-
-
 @configclass
 class EventCfg:
     """Randomisation events and conveyor-belt driving."""
@@ -153,10 +138,22 @@ class EventCfg:
         params=_BELT_PARAMS,
     )
 
-    # -- per-object reset (position / orientation / velocity) -----------------
-    reset_object_0 = _object_reset_term("object_0")
-    reset_object_1 = _object_reset_term("object_1")
-    reset_object_2 = _object_reset_term("object_2")
+    # -- per-object reset with shuffled lanes ---------------------------------
+    # The three spawn lanes are randomly permuted among the objects each reset
+    # so a given shape is not tied to a fixed lane (forces the policy to track
+    # the target object rather than memorise a lane position).
+    reset_objects = EventTerm(
+        func=mdp.reset_objects_shuffled,
+        mode="reset",
+        params={
+            "asset_names": list(OBJECT_NAMES),
+            "lane_positions": [(0.50, 0.35), (0.45, 0.15), (0.55, -0.05)],
+            "pose_range": {"x": (-0.06, 0.06), "y": (-0.15, 0.15)},
+            "yaw_range": (-0.5, 0.5),
+            "conveyor_velocity": CONVEYOR_SPEED,
+            "velocity_noise": CONVEYOR_OBJECT_NOISE,
+        },
+    )
 
     # -- conveyor drive (interval, ~20 Hz) ------------------------------------
     # Mirrors the per-tick OmniGraph evaluation of the IsaacConveyor node

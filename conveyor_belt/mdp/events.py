@@ -207,3 +207,62 @@ def reset_object_on_conveyor(
 
     asset.write_root_pose_to_sim(root_states[:, :7], env_ids)
     asset.write_root_velocity_to_sim(root_states[:, 7:], env_ids)
+
+
+def reset_objects_shuffled(
+    env: ManagerBasedRLEnv,
+    env_ids: torch.Tensor,
+    asset_names: list[str],
+    lane_positions: list[tuple[float, float]],
+    pose_range: dict[str, tuple[float, float]],
+    yaw_range: tuple[float, float],
+    conveyor_velocity: tuple[float, float, float],
+    velocity_noise: float,
+) -> None:
+    """Reset all objects, shuffling which object occupies which lane per env.
+
+    The three spawn lanes (x, y positions along the belt) are randomly
+    permuted among the objects on every reset, so a given shape is no longer
+    tied to a fixed lane.  Each object keeps its own default spawn orientation
+    (e.g. the cone's upright tilt) and spawn height; only the (x, y) lane and
+    a random yaw are applied.
+    """
+    n = len(env_ids)
+    device = env.device
+    num_obj = len(asset_names)
+
+    # Per-env random permutation of the lane indices.
+    perm = torch.argsort(torch.rand(n, num_obj, device=device), dim=1)  # (n, num_obj)
+    lanes = torch.tensor(lane_positions, device=device, dtype=torch.float32)  # (num_obj, 2)
+
+    for j, name in enumerate(asset_names):
+        asset: RigidObject = env.scene[name]
+        root_states = wp.to_torch(asset.data.default_root_state)[env_ids].clone()
+
+        # --- assign shuffled lane (x, y); keep default z ---
+        xy = lanes[perm[:, j]]  # (n, 2)
+        root_states[:, 0] = xy[:, 0]
+        root_states[:, 1] = xy[:, 1]
+
+        # --- jitter ---
+        for i, key in enumerate(("x", "y", "z")):
+            lo, hi = pose_range.get(key, (0.0, 0.0))
+            root_states[:, i] += torch.empty(n, device=device).uniform_(lo, hi)
+        root_states[:, :3] += env.scene.env_origins[env_ids]
+
+        # --- random yaw composed with the object's default orientation ---
+        default_quat = root_states[:, 3:7].clone()
+        yaw = torch.empty(n, device=device).uniform_(*yaw_range)
+        yaw_quat = torch.zeros((n, 4), device=device)
+        yaw_quat[:, 0] = torch.cos(yaw * 0.5)  # qw
+        yaw_quat[:, 3] = torch.sin(yaw * 0.5)  # qz
+        root_states[:, 3:7] = quat_mul(yaw_quat, default_quat)
+
+        # --- match belt velocity (noise on travel axis only) ---
+        root_states[:, 7:10] = _conveyor_velocity_tensor(
+            conveyor_velocity, velocity_noise, n, device
+        )
+        root_states[:, 10:13] = 0.0
+
+        asset.write_root_pose_to_sim(root_states[:, :7], env_ids)
+        asset.write_root_velocity_to_sim(root_states[:, 7:], env_ids)
