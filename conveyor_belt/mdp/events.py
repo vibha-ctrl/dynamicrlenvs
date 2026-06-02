@@ -195,10 +195,57 @@ def reset_object_on_conveyor(
     root_states[:, 6] = torch.sin(yaw * 0.5)  # qz
 
     # --- match belt velocity (noise on travel axis only) ---
-    root_states[:, 7:10] = _conveyor_velocity_tensor(
-        conveyor_velocity, velocity_noise, n, env.device
-    )
+    # Use the per-env belt velocity set by reset_conveyor_belt so objects are
+    # placed moving with the (randomised speed/direction) belt and don't get a
+    # friction impulse at reset. Fall back to the nominal velocity if the belt
+    # hasn't been reset yet.
+    if hasattr(env, "_belt_velocity"):
+        belt_vel = env._belt_velocity[env_ids].clone()
+        if velocity_noise > 0.0:
+            mask = belt_vel.abs() > 1e-6
+            perturbation = torch.empty(n, 3, device=env.device).uniform_(
+                -velocity_noise, velocity_noise
+            )
+            belt_vel += perturbation * mask
+        root_states[:, 7:10] = belt_vel
+    else:
+        root_states[:, 7:10] = _conveyor_velocity_tensor(
+            conveyor_velocity, velocity_noise, n, env.device
+        )
     root_states[:, 10:13] = 0.0
 
     asset.write_root_pose_to_sim(root_states[:, :7], env_ids)
     asset.write_root_velocity_to_sim(root_states[:, 7:], env_ids)
+
+
+def shuffle_object_spawn_lanes(
+    env: ManagerBasedRLEnv,
+    env_ids: torch.Tensor,
+    object_names: list[str],
+) -> None:
+    """Swap the (x, y) spawn spots among the objects with a per-env permutation.
+
+    Runs *after* the per-object resets.  Each object keeps its own height (z),
+    orientation, and velocity; only the horizontal landing spot is reassigned,
+    so object identity is decoupled from start position.  This prevents the
+    policy from learning "the target is whatever is in the front lane".
+    """
+    n = len(env_ids)
+    num = len(object_names)
+    assets = [env.scene[name] for name in object_names]
+
+    # current world xy of each object for the resetting envs -> (n, num, 2)
+    xy = torch.stack(
+        [wp.to_torch(a.data.root_pos_w)[env_ids, :2] for a in assets], dim=1
+    ).clone()
+
+    # independent random permutation of lanes per env -> (n, num)
+    perm = torch.argsort(torch.rand(n, num, device=env.device), dim=1)
+    shuffled_xy = torch.gather(xy, 1, perm.unsqueeze(-1).expand(-1, -1, 2))
+
+    for i, asset in enumerate(assets):
+        pos = wp.to_torch(asset.data.root_pos_w)[env_ids].clone()
+        quat = wp.to_torch(asset.data.root_quat_w)[env_ids].clone()
+        pos[:, :2] = shuffled_xy[:, i, :]
+        pose = torch.cat([pos, quat], dim=-1)
+        asset.write_root_pose_to_sim(pose, env_ids)

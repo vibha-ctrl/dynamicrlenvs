@@ -37,7 +37,7 @@ OBJECT_NAMES: list[str] = ["object_0", "object_1", "object_2"]
 
 CONVEYOR_SPEED = (0.0, -0.05, 0.0)  # m/s along -y
 CONVEYOR_BELT_NOISE = 0.005         # ± m/s — belt speed variation (small)
-CONVEYOR_OBJECT_NOISE = 0.02        # ± m/s — per-object spawn velocity spread
+CONVEYOR_OBJECT_NOISE = 0.0         # ± m/s — per-object spawn velocity spread (off: match belt exactly)
 
 
 # ---------------------------------------------------------------------------
@@ -157,6 +157,13 @@ class EventCfg:
     reset_object_0 = _object_reset_term("object_0")
     reset_object_1 = _object_reset_term("object_1")
     reset_object_2 = _object_reset_term("object_2")
+
+    # -- shuffle which object lands in which lane (must run after resets) ------
+    shuffle_lanes = EventTerm(
+        func=mdp.shuffle_object_spawn_lanes,
+        mode="reset",
+        params={"object_names": OBJECT_NAMES},
+    )
 
     # -- conveyor drive (interval, ~20 Hz) ------------------------------------
     # Mirrors the per-tick OmniGraph evaluation of the IsaacConveyor node

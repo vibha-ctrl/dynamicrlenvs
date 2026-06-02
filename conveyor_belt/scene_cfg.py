@@ -115,8 +115,8 @@ def _object_spawn_cfg(color: tuple[float, float, float]) -> sim_utils.CuboidCfg:
     return sim_utils.CuboidCfg(
         size=OBJECT_SIZE,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
-            solver_position_iteration_count=16,
-            solver_velocity_iteration_count=1,
+            solver_position_iteration_count=64,
+            solver_velocity_iteration_count=8,
             max_angular_velocity=100.0,
             max_linear_velocity=10.0,
             max_depenetration_velocity=1.0,
