@@ -91,12 +91,19 @@ _PEDESTAL_COLOR = (0.35, 0.35, 0.38)
 # Objects
 # ---------------------------------------------------------------------------
 
-OBJECT_SIZE = (0.04, 0.04, 0.04)
+OBJECT_WIDTH = 0.04
+OBJECT_DEPTH = 0.04
 OBJECT_MASS_KG = 0.1
-OBJECT_SPAWN_Z = (
-    CONVEYOR_SURFACE_Z + BELT_THICKNESS / 2 + OBJECT_SIZE[2] / 2
-    + 0.002  # small clearance to avoid first-frame interpenetration with belt
-)
+
+# Fixed heights: tall (red), medium (green), short (blue)
+_OBJECT_HEIGHTS: list[float] = [0.10, 0.07, 0.04]
+
+
+def _object_spawn_z(height: float) -> float:
+    return CONVEYOR_SURFACE_Z + BELT_THICKNESS / 2 + height / 2 + 0.002
+
+
+OBJECT_SPAWN_Z = _object_spawn_z(_OBJECT_HEIGHTS[0])  # fallback for any legacy refs
 
 # Default belt velocity (m/s).  -y = objects travel right-to-left.
 CONVEYOR_VELOCITY = (0.0, -0.05, 0.0)
@@ -110,10 +117,10 @@ _ee_marker_cfg.markers["frame"].scale = (0.1, 0.1, 0.1)
 _ee_marker_cfg.prim_path = "/Visuals/FrameTransformer"
 
 
-def _object_spawn_cfg(color: tuple[float, float, float]) -> sim_utils.CuboidCfg:
+def _object_spawn_cfg(color: tuple[float, float, float], height: float) -> sim_utils.CuboidCfg:
     """Return a CuboidCfg for one conveyor object."""
     return sim_utils.CuboidCfg(
-        size=OBJECT_SIZE,
+        size=(OBJECT_WIDTH, OBJECT_DEPTH, height),
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             solver_position_iteration_count=64,
             solver_velocity_iteration_count=8,
@@ -336,28 +343,28 @@ class ConveyorSceneCfg(InteractiveSceneCfg):
     object_0: RigidObjectCfg = RigidObjectCfg(
         prim_path="{ENV_REGEX_NS}/Object_0",
         init_state=RigidObjectCfg.InitialStateCfg(
-            pos=[0.50, 0.35, OBJECT_SPAWN_Z],
+            pos=[0.50, 0.35, _object_spawn_z(_OBJECT_HEIGHTS[0])],
             rot=[1, 0, 0, 0],
         ),
-        spawn=_object_spawn_cfg(color=(0.85, 0.15, 0.15)),
+        spawn=_object_spawn_cfg(color=(0.85, 0.15, 0.15), height=_OBJECT_HEIGHTS[0]),
     )
 
     object_1: RigidObjectCfg = RigidObjectCfg(
         prim_path="{ENV_REGEX_NS}/Object_1",
         init_state=RigidObjectCfg.InitialStateCfg(
-            pos=[0.45, 0.15, OBJECT_SPAWN_Z],
+            pos=[0.45, 0.15, _object_spawn_z(_OBJECT_HEIGHTS[1])],
             rot=[1, 0, 0, 0],
         ),
-        spawn=_object_spawn_cfg(color=(0.15, 0.75, 0.15)),
+        spawn=_object_spawn_cfg(color=(0.15, 0.75, 0.15), height=_OBJECT_HEIGHTS[1]),
     )
 
     object_2: RigidObjectCfg = RigidObjectCfg(
         prim_path="{ENV_REGEX_NS}/Object_2",
         init_state=RigidObjectCfg.InitialStateCfg(
-            pos=[0.55, -0.05, OBJECT_SPAWN_Z],
+            pos=[0.55, -0.05, _object_spawn_z(_OBJECT_HEIGHTS[2])],
             rot=[1, 0, 0, 0],
         ),
-        spawn=_object_spawn_cfg(color=(0.15, 0.15, 0.85)),
+        spawn=_object_spawn_cfg(color=(0.15, 0.15, 0.85), height=_OBJECT_HEIGHTS[2]),
     )
 
     # -- Ground plane ---------------------------------------------------------
